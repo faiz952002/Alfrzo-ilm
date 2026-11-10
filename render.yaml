@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: alfrzo-ilm
+    runtime: node
+    buildCommand: "true"
+    startCommand: node server/server.js
+    healthCheckPath: /api/health
+    envVars:
+      - { key: NODE_VERSION, value: "22" }
+      - { key: TRUST_PROXY, value: "1" }
+      - { key: SUPABASE_URL, sync: false }
+      - { key: SUPABASE_ANON_KEY, sync: false }
+      - { key: SITE_URL, sync: false }
+      - { key: CONTACT_EMAIL, sync: false }
