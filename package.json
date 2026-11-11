@@ -1,8 +1,14 @@
 {
-  "name": "alfrzo-ilm-tests",
+  "name": "alfrzo-ilm",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "test:db": "node --test db.test.mjs"
+    "start": "node server/server.js",
+    "test": "node --test tests/server.test.mjs",
+    "test:db": "node --test --test-concurrency=1 tests/db.test.mjs tests/db3.test.mjs",
+    "test:e2e": "node --test tests/e2e/flows.test.mjs"
   }
 }

@@ -14,6 +14,7 @@ Islamic sawal-jawab platform: log sawal puchte hain, **verified aalim/mufti** ja
 3. **Authentication > URL Configuration:** Site URL = aapki site; Redirect URLs me `https://your-domain.com/reset` jodo.
 4. **Deploy** (Render example): repo GitHub par daalo → Render > New > Blueprint (`render.yaml`) → env vars bharo (`.env.example` dekho).
    Local chalane ke liye: `SUPABASE_URL=... SUPABASE_ANON_KEY=... npm start` → http://localhost:3000
+   **GitHub Pages par nahi chalega:** app ko `server/server.js` (Node) chahiye — config, payments aur SEO wahi se aate hain.
 5. **Pehla admin:** app me normal signup karo, phir Supabase SQL Editor me:
    ```sql
    update public.profiles set role = 'admin'

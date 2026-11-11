@@ -1,0 +1,15 @@
+{
+  "name": "Alfrzo Ilm – सवाल पूछो, इल्म पाओ",
+  "short_name": "Alfrzo Ilm",
+  "description": "अपने दीनी सवाल पूछिए और verified आलिम/मुफ़्ती से जवाब पाइए। Ask your Islamic questions and get answers from verified scholars.",
+  "lang": "hi",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f7f9f8",
+  "theme_color": "#ffffff",
+  "icons": [
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

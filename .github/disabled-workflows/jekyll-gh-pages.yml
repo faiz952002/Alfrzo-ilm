@@ -1,3 +1,8 @@
+# DISABLED BACKUP (Phase 0). GitHub only runs workflows inside .github/workflows/, so this file is inactive here.
+# Why disabled: GitHub Pages is static hosting. Alfrzo Ilm needs its Node server (server/server.js) for the
+# public config, payments and per-question SEO, and it published the whole repository (SQL, tests) as a website.
+# To restore it, move this file back to .github/workflows/ (content below is unchanged).
+#
 # Sample workflow for building and deploying a Jekyll site to GitHub Pages
 name: Deploy Jekyll with GitHub Pages dependencies preinstalled
 

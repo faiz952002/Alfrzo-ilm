@@ -1,0 +1,50 @@
+# Runs the project's own tests on every push and pull request. It never deploys anything.
+# (The old GitHub Pages workflow is kept, disabled, in .github/disabled-workflows/. GitHub Pages cannot run
+#  this app: it needs the Node server in server/ for config, payments and SEO. See README.md for hosting.)
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  server:
+    name: Server (config, security headers, payments, SEO)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+
+  database:
+    name: Database (schema, RLS, RPCs on real PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres   # throw-away CI database only
+      PGDATABASE: askdeen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Core schema tests
+        run: bash tests/reset-db.sh && node --test tests/db.test.mjs
+      - name: Consultations / messages / reels tests
+        run: bash tests/reset-db.sh && node --test tests/db3.test.mjs
