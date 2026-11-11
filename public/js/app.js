@@ -39,6 +39,7 @@ async function render() {
   clear(view); view.className = 'fade-in'; window.scrollTo(0, 0);
   paintNav(url.pathname);
   if (!isConfigured()) return renderSetup();
+  if (offline) return renderOffline();
   const ctx = {
     params, query: url.searchParams, path: url.pathname, alive: () => my === token,
     cleanup: fn => cleanups.push(fn), setTitle: (a, b, c) => setMeta(a, b, c),
@@ -52,6 +53,18 @@ async function render() {
     console.error(e);
     if (my === token) { clear(view).append(h('div.empty', icon('alert'), h('p', t('err.generic')), h('button.btn.ghost.sm', { onclick: () => render() }, t('retry')))); }
   }
+}
+
+// The database could not be reached while starting (no internet, wrong SUPABASE_URL, paused Supabase project).
+// Show a clear message with a retry button instead of an empty page.
+function renderOffline() {
+  setMeta(null);
+  const btn = h('button.btn.ghost.sm', { type: 'button', onclick: async () => {
+    btn.disabled = true;
+    if (await connect()) { pollUnread(); }
+    btn.disabled = false; render();
+  } }, t('retry'));
+  view.append(h('div.empty', { role: 'alert' }, icon('alert'), h('p', t('err.network')), btn));
 }
 
 function renderSetup() {
@@ -122,10 +135,13 @@ S.refreshShell = () => {
 };
 async function pollUnread() {
   if (!S.user) { S.unread = 0; S.unreadMsgs = 0; S.refreshShell(); return; }
-  const [r, m] = await Promise.all([
-    S.sb.from('notifications').select('id', { count: 'exact' }).eq('read', false).limit(1),
-    S.sb.from('conversation_list').select('unread').gt('unread', 0),
-  ]);
+  let r, m;
+  try {
+    [r, m] = await Promise.all([
+      S.sb.from('notifications').select('id', { count: 'exact' }).eq('read', false).limit(1),
+      S.sb.from('conversation_list').select('unread').gt('unread', 0),
+    ]);
+  } catch { return; }   // offline: keep the last badge counts, try again on the next poll
   if (!r.error) S.unread = r.count || 0;
   if (!m.error) S.unreadMsgs = (m.data || []).reduce((n, x) => n + x.unread, 0);
   S.refreshShell();
@@ -147,6 +163,14 @@ document.addEventListener('click', e => {
 });
 addEventListener('popstate', render);
 
+// Load the signed-in profile and the categories. Returns false (and remembers it) when the database is unreachable.
+let offline = false;
+async function connect() {
+  try { await Promise.all([loadProfile(), loadCategories()]); offline = false; }
+  catch (e) { console.error('Could not reach the database:', e?.message || e); offline = true; }
+  return !offline;
+}
+
 async function boot() {
   initLang();
   const root = document.getElementById('root');
@@ -156,10 +180,12 @@ async function boot() {
     const r = await S.sb.auth.consumeUrlSession().catch(() => null);
     if (r?.error) toast(r.error.message, true);
     await S.sb.auth.restore().catch(() => {});
-    await Promise.all([loadProfile(), loadCategories()]);
-    if (S.profile?.language && !localStorage.getItem('askdeen.lang')) { setLang(S.profile.language); buildShell(root); }
+    await connect();
+    let savedLang = null; try { savedLang = localStorage.getItem('askdeen.lang'); } catch { /* storage blocked */ }
+    if (S.profile?.language && !savedLang) { setLang(S.profile.language); buildShell(root); }
     S.sb.auth.onChange(async ev => {
-      await loadProfile(); pollUnread();
+      try { await loadProfile(); } catch { /* offline: keep the current state */ }
+      pollUnread();
       if (ev === 'SIGNED_OUT') { S.unread = 0; S.unreadMsgs = 0; S.refreshShell(); if (/^\/(profile|my-|saved|following|settings|notifications|dashboard|admin|ask|messages|consult)/.test(location.pathname)) navigate('/login', true); }
     });
     if (r?.type === 'recovery') history.replaceState(null, '', '/reset');
