@@ -63,11 +63,13 @@ export default async function detail(view, ctx) {
 
   if (mine) {
     qcard.append(h('div.notice' + (q.status === 'rejected' ? '.bad' : q.status === 'pending_review' ? '.warn' : ''), { style: 'margin:12px 0 0' }, icon('info'), h('div', t('my.status.' + q.status))));
-    qcard.append(h('button.btn.ghost.sm', { type: 'button', style: 'margin-top:10px', onclick: async () => {
+    // A question that already has an answer stays (the scholar's answer would be lost); the database enforces it too.
+    if (answers.length) qcard.append(h('div.small.muted', { style: 'margin-top:10px' }, icon('lock', ''), ' ', t('err.hasanswers')));
+    else qcard.append(h('button.btn.ghost.sm', { type: 'button', style: 'margin-top:10px', onclick: async () => {
       if (!(await confirmBox(t('my.delete'), t('my.delete.d'), t('delete'), t('cancel'), true))) return;
-      if (mine.image_path) S.sb.storage.remove('question-images', [mine.image_path]);
       const r = await S.sb.from('questions').delete().eq('id', id);
       if (r.error) return toast(errMsg(r.error), true);
+      if (mine.image_path) S.sb.storage.remove('question-images', [mine.image_path]);   // only after the question is really gone
       toast(t('my.deleted')); S.go('/my-questions', true);
     } }, icon('trash'), t('my.delete')));
   }

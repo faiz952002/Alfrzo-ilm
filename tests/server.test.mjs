@@ -7,6 +7,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { loadConfig } from '../server/config.js';
 import { createServer } from '../server/server.js';
+import { clientIp } from '../server/security.js';
 
 const b64 = o => Buffer.from(JSON.stringify(o)).toString('base64url');
 const jwt = role => `${b64({ alg: 'HS256' })}.${b64({ role })}.sig`;
@@ -309,4 +310,29 @@ test('consultation payment: the webhook alone can confirm a booking (buyer close
 test('public config carries the meeting base URL and CSP allows video from storage', async () => {
   assert.match(await (await call('/js/config.js')).text(), /"MEETING_BASE":"https:\/\/meet\.jit\.si\/"/);
   assert.match((await call('/')).headers.get('content-security-policy'), /media-src 'self' blob: http:\/\/127\.0\.0\.1/);
+});
+
+// =============================== client IP behind a proxy (M7) ===============================
+const fakeReq = (xff, remote = '10.0.0.9') => ({ headers: xff == null ? {} : { 'x-forwarded-for': xff }, socket: { remoteAddress: remote } });
+test('client IP: a forged X-Forwarded-For entry cannot choose the rate-limit key', () => {
+  // client sends "1.2.3.4" itself; the one trusted proxy appends the real address 203.0.113.7
+  assert.equal(clientIp(fakeReq('1.2.3.4, 203.0.113.7'), 1), '203.0.113.7');
+  assert.equal(clientIp(fakeReq('9.9.9.9, 8.8.8.8, 203.0.113.7'), 1), '203.0.113.7');
+  assert.equal(clientIp(fakeReq('203.0.113.7'), 1), '203.0.113.7');                  // honest single hop
+  assert.equal(clientIp(fakeReq('1.2.3.4, 198.51.100.2, 192.0.2.1'), 2), '198.51.100.2');   // two proxies
+  assert.equal(clientIp(fakeReq('1.2.3.4'), 0), '10.0.0.9');                         // no proxy: header ignored
+  assert.equal(clientIp(fakeReq(null), 1), '10.0.0.9');
+  assert.equal(clientIp(fakeReq(' , '), 1), '10.0.0.9');
+});
+test('TRUST_PROXY accepts a proxy count, true/1 meaning one proxy, empty meaning none', () => {
+  const tp = v => loadConfig({ SUPABASE_URL: 'https://x.supabase.co', SUPABASE_ANON_KEY: ANON, TRUST_PROXY: v }).trustProxy;
+  assert.deepEqual(['1', 'true', 'yes', '2', '', '0', 'no', 'junk'].map(tp), [1, 1, 1, 2, 0, 0, 0, 0]);
+});
+test('rate limiting cannot be dodged by rotating a forged X-Forwarded-For', async () => {
+  const c = loadConfig({ SUPABASE_URL: cfg.supabaseUrl, SUPABASE_ANON_KEY: ANON, TRUST_PROXY: '1' });
+  const s = createServer(c, logSink); const port = await listen(s);
+  let last;
+  for (let i = 0; i < 125; i++) last = (await fetch(`http://127.0.0.1:${port}/api/health`, { headers: { 'X-Forwarded-For': `10.1.${i >> 8}.${i & 255}, 203.0.113.50` } })).status;
+  s.close(); s.closeAllConnections?.();
+  assert.equal(last, 429);
 });

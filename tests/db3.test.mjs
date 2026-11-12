@@ -171,7 +171,7 @@ test('reels: only verified scholars post, into their own folder; captions are ch
   assert.equal(as('anon', `select scholar_name from reel_feed where id='${reel}'`), 'SCH');
   as('amy', `insert into reel_likes(reel_id,user_id) values('${reel}','${U.amy}')`);
   fails(() => as('amy', `insert into reel_likes(reel_id,user_id) values('${reel}','${U.ben}')`), /row-level security/);
-  as('anon', `select reel_viewed('${reel}')`);
+  as('amy', `select reel_viewed('${reel}')`);                                   // patch_004: logged-in views only (see db4)
   assert.equal(root(`select likes_count||'/'||views_count from reels where id='${reel}'`), '1/1');
   fails(() => as('amy', `update reels set likes_count=999 where id='${reel}'`), /permission denied/);
 });

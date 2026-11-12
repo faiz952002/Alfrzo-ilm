@@ -1,9 +1,13 @@
 import crypto from 'node:crypto';
 
+// trustProxy = how many proxies in front of this server append to X-Forwarded-For (TRUST_PROXY, 1 on Render).
+// Each trusted proxy appends the address it saw, so the client is the entry `trustProxy` places from the RIGHT.
+// Entries further left were sent by the client itself and can be forged, so they are never used.
 export function clientIp(req, trustProxy) {
-  if (trustProxy) {
-    const xf = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-    if (xf) return xf;
+  const hops = trustProxy === true ? 1 : Math.max(0, Math.floor(Number(trustProxy) || 0));
+  if (hops > 0) {
+    const chain = String(req.headers['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (chain.length) return chain[Math.max(0, chain.length - hops)];
   }
   return req.socket.remoteAddress || 'unknown';
 }

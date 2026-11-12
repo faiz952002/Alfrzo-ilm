@@ -107,6 +107,10 @@ const hi = {
   'err.weak': 'पासवर्ड कम से कम 8 अक्षर का रखें।', 'err.forbidden': 'आपको इसकी इजाज़त नहीं है।', 'err.dup': 'यह पहले से मौजूद है।',
   'err.rate': 'आप बहुत जल्दी-जल्दी कोशिश कर रहे हैं। कुछ देर बाद दोबारा करें।', 'err.suspended': 'आपका खाता रोका गया है। जानकारी के लिए संपर्क करें।',
   'err.notopen': 'यह सवाल अभी जवाब के लिए खुला नहीं है।', 'err.contact': 'निजता की सुरक्षा के लिए फ़ोन नंबर, ईमेल या लिंक न लिखें।',
+  'err.toolate': 'अब इसे रद्द नहीं किया जा सकता। मशविरा शुरू होने से 2 घंटे पहले तक ही रद्द हो सकता है।',
+  'err.overlap': 'यह समय आपके किसी दूसरे खुले समय से टकरा रहा है। कोई और समय चुनें।',
+  'err.hasanswers': 'जिस सवाल का जवाब आ चुका है उसे हटाया नहीं जा सकता। ज़रूरत हो तो सपोर्ट से संपर्क करें।',
+  'consult.cutoffnote': 'आप मशविरा शुरू होने से 2 घंटे पहले तक रद्द कर सकते हैं।',
 
   'privacy.link': 'निजता नीति', 'privacy.title': 'निजता और सुरक्षा',
   'prem.title': 'Alfrzo Ilm Premium', 'prem.upgrade': 'अपग्रेड',
@@ -217,6 +221,10 @@ const en = {
   'err.weak': 'Use a password of at least 8 characters.', 'err.forbidden': 'You are not allowed to do this.', 'err.dup': 'This already exists.',
   'err.rate': 'You are trying too fast. Please wait a while and try again.', 'err.suspended': 'Your account has been suspended. Please contact support.',
   'err.notopen': 'This question is not open for answers yet.', 'err.contact': 'To protect privacy, do not write phone numbers, emails or links.',
+  'err.toolate': 'This can no longer be cancelled. Bookings can be cancelled up to 2 hours before the start.',
+  'err.overlap': 'This time overlaps another of your open times. Please choose a different time.',
+  'err.hasanswers': 'A question that has an answer cannot be deleted. Please contact support if needed.',
+  'consult.cutoffnote': 'You can cancel up to 2 hours before the consultation starts.',
 
   'privacy.link': 'Privacy policy', 'privacy.title': 'Privacy & safety',
   'prem.title': 'Alfrzo Ilm Premium', 'prem.upgrade': 'Upgrade',

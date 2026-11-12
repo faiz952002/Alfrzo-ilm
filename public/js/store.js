@@ -38,6 +38,9 @@ export function errMsg(e) {
   if (/SUSPENDED/.test(m)) return t('err.suspended');
   if (/23505|duplicate key/.test(m)) return t('err.dup');
   if (/QUESTION_NOT_OPEN/.test(m)) return t('err.notopen');
+  if (/TOO_LATE_TO_CANCEL/.test(m)) return t('err.toolate');
+  if (/SLOT_OVERLAP/.test(m)) return t('err.overlap');
+  if (/QUESTION_HAS_ANSWERS/.test(m)) return t('err.hasanswers');
   if (/row-level security|42501|FORBIDDEN|permission denied/.test(m)) return t('err.forbidden');
   if (/Invalid login/i.test(m)) return t('err.login');
   if (/already registered|already been registered/i.test(m)) return t('err.exists');

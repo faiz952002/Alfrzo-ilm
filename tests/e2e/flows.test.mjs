@@ -122,7 +122,7 @@ test('a PRIVATE question is stored as private', async () => {
   const { page } = user;
   await go(page, '/ask'); await page.waitForSelector('#qt');
   await page.click('.seg button:has-text("Private")');
-  assert.match(await page.locator('form').innerText(), /Only you, the answering scholars and admins/);
+  assert.match(await page.locator('form').innerText(), /Only you, verified scholars \(so that one of them can answer\) and admins/);
   await page.fill('#qt', 'A private family matter about inheritance shares'); await page.selectOption('#qc', catId('family'));
   await page.click('form button[type=submit]'); await page.waitForSelector('.card.center h2');
   qpriv = sql(`select id from questions where title like 'A private family%'`);
