@@ -1,14 +1,23 @@
+# Render Blueprint for Alfrzo Ilm (Render > New > Blueprint > pick this repo and branch).
+# Values marked "sync: false" are typed into the Render dashboard; secrets never go in this file.
 services:
   - type: web
     name: alfrzo-ilm
     runtime: node
-    buildCommand: "true"
+    # free = no cost, but the app sleeps after ~15 min without visitors (first visit then takes ~1 min).
+    # Change to "starter" (paid) before launch for an always-on site.
+    plan: free
+    # Deploy only when someone clicks "Manual Deploy" in Render, never automatically on a git push.
+    autoDeploy: false
+    buildCommand: "true"            # no build step and no npm dependencies
     startCommand: node server/server.js
     healthCheckPath: /api/health
     envVars:
       - { key: NODE_VERSION, value: "22" }
       - { key: TRUST_PROXY, value: "1" }
-      - { key: SUPABASE_URL, sync: false }
-      - { key: SUPABASE_ANON_KEY, sync: false }
-      - { key: SITE_URL, sync: false }
-      - { key: CONTACT_EMAIL, sync: false }
+      - { key: SUPABASE_URL, sync: false }        # Supabase > Project Settings > API > Project URL
+      - { key: SUPABASE_ANON_KEY, sync: false }   # the PUBLIC anon / publishable key (never the service_role key)
+      - { key: SITE_URL, sync: false }            # e.g. https://alfrzo-ilm.onrender.com (or your own domain)
+      - { key: CONTACT_EMAIL, sync: false }       # shown on the privacy page
+      # Payments stay OFF until these are added in the dashboard (see .env.example):
+      # SUPABASE_SERVICE_ROLE_KEY, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET, RAZORPAY_WEBHOOK_SECRET
