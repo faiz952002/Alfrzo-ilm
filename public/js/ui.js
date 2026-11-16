@@ -50,6 +50,15 @@ const P = {
   upload: '<path d="M12 16V4M7 9l5-5 5 5M4 20h16"/>',
   fire: '<path d="M12 2c1 4 5 5.5 5 11a5 5 0 0 1-10 0c0-2 1-3 2-4 .3 1.5 1 2 2 2-1-3 0-6 1-9z"/>',
   grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  // night & gold redesign
+  quran: '<path d="M12 6.5C10 5 6.5 4.5 3 5.5v13c3.5-1 7-.5 9 1 2-1.5 5.5-2 9-1v-13c-3.5-1-7-.5-9 1z"/><path d="M12 6.5v13"/><path d="M5.5 9c1.6-.3 3.3-.1 4.5.5M5.5 12c1.6-.3 3.3-.1 4.5.5M5.5 15c1.6-.3 3.3-.1 4.5.5M14 9.5c1.2-.6 2.9-.8 4.5-.5M14 12.5c1.2-.6 2.9-.8 4.5-.5M14 15.5c1.2-.6 2.9-.8 4.5-.5"/>',
+  dome: '<path d="M12 2v3"/><path d="M10.6 3.6h2.8"/><path d="M5 15a7 7 0 0 1 14 0"/><path d="M3 15h18"/><path d="M4 15v5h16v-5"/><path d="M9 20v-3a3 3 0 0 1 6 0v3"/><path d="M7 15v-1M17 15v-1"/>',
+  scales: '<path d="M12 3v18"/><path d="M8 21h8"/><path d="M5 7h14"/><path d="M12 4.5a1 1 0 1 0 0 .01"/><path d="M5 7l-3 7a3 3 0 0 0 6 0z"/><path d="M19 7l-3 7a3 3 0 0 0 6 0z"/>',
+  scholar: '<path d="M8 6.5a4 4 0 0 1 8 0"/><path d="M7.5 6.5h9v1.5h-9z"/><path d="M8.3 8.5c0 2.6 1.7 4.5 3.7 4.5s3.7-1.9 3.7-4.5"/><path d="M9.5 12.5c.3 1.5 1.3 2.5 2.5 2.5s2.2-1 2.5-2.5"/><path d="M4 21c0-3.6 3.2-6 8-6s8 2.4 8 6z"/>',
+  headset: '<path d="M4 14v-2a8 8 0 0 1 16 0v2"/><rect x="3" y="13" width="4" height="6" rx="1.5"/><rect x="17" y="13" width="4" height="6" rx="1.5"/><path d="M19 19c0 1.7-1.8 2.5-4 2.5h-2"/>',
+  pin: '<path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.6"/>',
+  lotus: '<path d="M12 4c2 2.4 2.8 5 2.8 7.4 0 2.6-1.3 4.6-2.8 5.6-1.5-1-2.8-3-2.8-5.6C9.2 9 10 6.4 12 4z"/><path d="M9.6 9.4C7 8.4 4.6 8.6 3 9.3c.6 3.3 2.6 6 5.6 7.2 1.2.5 2.3.6 3.4.5"/><path d="M14.4 9.4c2.6-1 5-.8 6.6-.1-.6 3.3-2.6 6-5.6 7.2-1.2.5-2.3.6-3.4.5"/><path d="M3 19.5c3-1.6 6-2 9-2s6 .4 9 2"/>',
+  arrowRs: '<path d="M5 12h14M14 7l5 5-5 5"/>',
 };
 export function icon(name, cls = '') {
   const s = document.createElementNS(SVG, 'svg');
@@ -84,12 +93,16 @@ export const clear = el => { while (el.firstChild) el.removeChild(el.firstChild)
 export function logo(size) {
   const s = document.createElementNS(SVG, 'svg'); s.setAttribute('viewBox', '0 0 64 64'); if (size) { s.setAttribute('width', size); s.setAttribute('height', size); }
   s.setAttribute('aria-hidden', 'true');
-  s.innerHTML = `<defs><linearGradient id="lg${size || 0}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#139071"/><stop offset="1" stop-color="#052e24"/></linearGradient></defs>
-  <rect width="64" height="64" rx="17" fill="url(#lg${size || 0})"/>
-  <path d="M32 11c-3.5 4-3.5 8 0 10 3.5-2 3.5-6 0-10z" fill="#f3d98b"/>
-  <path d="M16 46c0-9 7-15 16-15s16 6 16 15z" fill="#fff"/><rect x="13" y="46" width="38" height="5" rx="2" fill="#f3d98b"/>
-  <rect x="10" y="26" width="4" height="25" rx="1.5" fill="#fff" opacity=".92"/><rect x="50" y="26" width="4" height="25" rx="1.5" fill="#fff" opacity=".92"/>
-  <path d="M12 20l-3 6h6z M52 20l-3 6h6z" fill="#f3d98b"/>`;
+  // Gold line mosque: onion dome with crescent finial, two minarets, arched doorways.
+  const id = 'lg' + (size || 0) + '_' + Math.random().toString(36).slice(2, 7);
+  s.innerHTML = `<defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f7dc95"/><stop offset=".55" stop-color="#e3b45c"/><stop offset="1" stop-color="#b9862f"/></linearGradient></defs>
+  <g fill="none" stroke="url(#${id})" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M32 4v5"/><path d="M29.5 6.5a3 3 0 1 0 5 0"/>
+    <path d="M32 11c-6 4.5-14 9-14 18v2h28v-2c0-9-8-13.5-14-18z"/>
+    <path d="M12 58V31M52 58V31"/><path d="M9.5 31h5M49.5 31h5"/><path d="M12 31l0-8M52 31v-8"/><path d="M10 23h4l-2-5zM50 23h4l-2-5z"/>
+    <path d="M17 58V36h30v22"/><path d="M8 58h48"/>
+    <path d="M27 58V48a5 5 0 0 1 10 0v10"/><path d="M20.5 52v-6a2.2 2.2 0 0 1 4.4 0v6M39.1 52v-6a2.2 2.2 0 0 1 4.4 0v6"/>
+  </g>`;
   return s;
 }
 export function skyline() {

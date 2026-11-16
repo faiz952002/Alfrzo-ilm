@@ -1,70 +1,57 @@
-import { S, catName } from '../store.js';
-import { t, getLang } from '../i18n.js';
-import { h, icon, clear, timeAgo } from '../ui.js';
-import { catArt, duskScene } from '../art.js';
-import { questionCard, skeletons, empty, errorBox, avatar, verifiedBadge } from '../components.js';
-import { fetchFeed, decorate, scholarMap } from '../data.js';
+import { S } from '../store.js';
+import { t } from '../i18n.js';
+import '../i18n.ui3.js';
+import { h, icon, logo } from '../ui.js';
+import { heroScene, cityArt, scholarFigure, bannerSkyline } from '../home-art.js';
+import { HOME_IMAGES } from '../home-images.js';
 
-// Home: category shortcuts, "Aaj ka Sawal" (most liked answered question), then a feed of scholars' answers.
+// Night & gold home: hero, search, quick topics, popular cities, ask a scholar, features, closing banner.
+// Every tile links to an existing page; nothing here needs new database tables.
+const CITIES = [['bengaluru', 'Bengaluru'], ['hyderabad', 'Hyderabad'], ['pune', 'Pune'], ['mumbai', 'Mumbai']];
+
 export default async function home(view, ctx) {
   ctx.setTitle(null, t('meta.home'));
-  let tab = 'all';
-  const story = (href, slug, label) => h('a.story', { href, role: 'listitem' }, h('span.ring', catArt(slug)), h('span.lbl', label));
-  const stories = h('div.stories', { role: 'list' }, story('/qa', 'foryou', t('home.foryou')), S.cats.map(c => story(`/qa?cat=${c.slug}`, c.slug, catName(c))));
-  const today = h('div'), list = h('div'), tabs = h('div.utabs', { role: 'tablist' });
-  const TABS = [['all', 'tab.all'], ['following', 'tab.following'], ['popular', 'tab.popular'], ['recent', 'tab.recent']];
-  const paintTabs = () => { clear(tabs); TABS.forEach(([k, lk]) => tabs.append(h('button', { type: 'button', role: 'tab', 'aria-selected': String(tab === k), onclick: () => {
-    if (k === 'following' && !S.user) return S.go('/login?next=/');
-    tab = k; paintTabs(); load();
-  } }, t(lk)))); };
+  const photo = (src, cls) => h('img', { src, class: cls, alt: '', decoding: 'async' });
 
-  view.append(stories, tabs, today, list,
-    h('p.center.small', { style: 'margin-top:14px' }, h('a', { href: '/privacy' }, t('privacy.link'))));
-  paintTabs();
+  // ---- hero: brand, tagline, quote over the night scene (menu + bell come from the shell, laid over it)
+  const hero = h('section.h3-hero',
+    HOME_IMAGES.hero ? photo(HOME_IMAGES.hero, 'hero-art') : heroScene(),
+    HOME_IMAGES.scholar ? photo(HOME_IMAGES.scholar, 'hero-scholar') : null,
+    h('div.h3-brand', logo(58), h('h1', 'Alfrzo Ilm'), h('p.h3-tag', h('span', { 'aria-hidden': 'true' }), t('home3.tagline'), h('span', { 'aria-hidden': 'true' }))),
+    h('p.h3-quote', h('span.l1', t('home3.q1')), h('span.l2', t('home3.q2')), h('span.orn', { 'aria-hidden': 'true' })));
 
-  // ---- Aaj ka Sawal ----
-  S.sb.from('question_feed').select('id,title,likes_count,answers_count').gt('answers_count', 0).order('likes_count', { ascending: false }).order('created_at', { ascending: false }).limit(1).then(r => {
-    if (!ctx.alive()) return; const q = r.data?.[0];
-    // nothing answered yet (a brand-new site): greet instead of leaving the top empty
-    if (!q) { today.append(h('a.today', { href: '/ask' }, duskScene(), h('small', 'Alfrzo Ilm'), h('h2', t('home.h1a') + ' ' + t('home.h1b')), h('div.row', h('span.btn.gold.sm', icon('plus'), t('home.ask'))))); return; }
-    today.append(h('a.today', { href: `/q/${q.id}` }, duskScene(), h('small', t('home.today')), h('h2', { dir: 'auto' }, q.title),
-      h('div.row', h('span.row', { style: 'gap:6px' }, icon('heart'), String(q.likes_count)), h('span.row', { style: 'gap:6px' }, icon('qa'), String(q.answers_count)), h('span.end', icon('bookmark')))));
-  });
+  // ---- search
+  const input = h('input', { type: 'search', placeholder: t('home3.search'), 'aria-label': t('home3.search'), maxlength: 100, enterkeyhint: 'search' });
+  const search = h('form.h3-search', { role: 'search', onsubmit: e => {
+    e.preventDefault(); const q = input.value.trim(); S.go('/search' + (q ? '?q=' + encodeURIComponent(q) : ''));
+  } }, icon('search', 'i'), input, h('button.go', { type: 'submit', 'aria-label': t('home3.searchgo') }, icon('arrowRs')));
 
-  async function load() {
-    clear(list); list.append(...skeletons(3));
-    try {
-      if (tab === 'all') return await answers();
-      const r = await fetchFeed({ tab: tab === 'recent' ? 'latest' : tab });
-      if (!ctx.alive()) return; clear(list);
-      if (!r.items.length) { list.append(r.noFollows ? empty('scholars', t('feed.nofollow'), h('a.btn.sm', { href: '/scholars' }, t('nav.scholars'))) : empty('inbox', t('home.noq'), h('a.btn.sm', { href: '/ask' }, t('home.ask')))); return; }
-      const st = await decorate(r.items); if (!ctx.alive()) return;
-      r.items.forEach(q => list.append(questionCard(q, st)));
-      list.append(h('div.center', { style: 'margin:6px 0' }, h('a.btn.ghost.sm', { href: '/qa' }, t('viewall'))));
-    } catch { if (ctx.alive()) { clear(list); list.append(errorBox(load)); } }
-  }
+  // ---- quick topics
+  const tile = (href, ic, key, tone) => h(`a.h3-tile.${tone}`, { href }, icon(ic), h('span', t(key)));
+  const quick = h('nav.h3-panel.h3-quick', { 'aria-label': t('home.cats') },
+    tile('/qa?cat=quran-hadith', 'quran', 'tile.quran', 'green'), tile('/qa?cat=quran-hadith', 'dome', 'tile.hadith', 'amber'),
+    tile('/categories', 'scales', 'tile.fiqah', 'violet'), tile('/scholars', 'scholar', 'tile.scholars', 'blue'), tile('/explore', 'grid', 'tile.more', 'slate'));
 
-  // Feed of answers: each card is a scholar's answer to a PUBLIC question (private ones are never in question_feed).
-  async function answers() {
-    const a = await S.sb.from('answers').select('id,question_id,scholar_id,body,created_at').eq('status', 'published').order('created_at', { ascending: false }).limit(30);
-    if (a.error) throw a.error;
-    const ids = [...new Set(a.data.map(x => x.question_id))];
-    const [qs, sm] = await Promise.all([ids.length ? S.sb.from('question_feed').select('id,title,category_id').in('id', ids) : { data: [] }, scholarMap(a.data.map(x => x.scholar_id))]);
-    if (!ctx.alive() || tab !== 'all') return; clear(list);
-    const titles = new Map((qs.data || []).map(q => [q.id, q]));
-    const posts = a.data.filter(x => titles.has(x.question_id) && sm.has(x.scholar_id)).slice(0, 12);
-    if (!posts.length) {
-      const r = await fetchFeed({ tab: 'latest' }); if (!ctx.alive()) return;
-      if (!r.items.length) { list.append(empty('inbox', t('home.noans'), h('a.btn.sm', { href: '/ask' }, t('home.ask')))); return; }
-      const st = await decorate(r.items); if (!ctx.alive()) return;
-      r.items.forEach(q => list.append(questionCard(q, st))); return;
-    }
-    posts.forEach(x => {
-      const s = sm.get(x.scholar_id), q = titles.get(x.question_id);
-      list.append(h('a.card.post', { href: `/q/${x.question_id}` },
-        h('div.who', avatar(s.display_name), h('div.grow', h('div', { style: 'font-weight:800' }, s.display_name, ' ', verifiedBadge()), h('div.small.muted', t('verified') + ' · ' + timeAgo(x.created_at, getLang())))),
-        h('p.qt', { dir: 'auto' }, q.title), h('div.ex', { dir: 'auto' }, x.body), h('span.more', t('post.more'))));
-    });
-  }
-  load();
+  // ---- popular cities (opens a search for the city name)
+  const cities = h('section.h3-panel.h3-cities',
+    h('div.h3-head', icon('pin', 'pin'), h('h2', t('home3.cities')), h('a', { href: '/search' }, t('home3.viewall'), ' ', icon('arrowRs'))),
+    h('div.h3-city-row', CITIES.map(([key, q]) => h('a.h3-city', { href: '/search?q=' + encodeURIComponent(q) },
+      HOME_IMAGES.cities[key] ? photo(HOME_IMAGES.cities[key], 'city-art') : cityArt(key), h('span', t('city.' + key))))));
+
+  // ---- ask a scholar
+  const ask = h('a.h3-ask', { href: '/ask' }, bannerSkyline(), h('span.fig', scholarFigure()),
+    h('span.txt', h('b.ttl', t('home3.askT')), h('span.sub', t('home3.askD')), h('span.h3-pill', t('home3.askB'), ' ', icon('arrowRs'))));
+
+  // ---- features
+  const unread = S.unreadMsgs > 0 ? h('span.badge-dot', S.unreadMsgs > 9 ? '9+' : String(S.unreadMsgs)) : null;
+  const feat = (href, ic, key, tone, extra) => h(`a.h3-feat.${tone}`, { href }, icon(ic), h('span', t(key)), extra);
+  const features = h('nav.h3-feats', { 'aria-label': t('menu.open') },
+    feat('/messages', 'chat', 'feat.chat', 'violet', unread), feat('/reels', 'video', 'feat.reels', 'red'), feat('/profile', 'user', 'feat.profile', 'blue'),
+    feat('/scholars', 'headset', 'feat.consult', 'green'), feat('/ask', 'help', 'feat.ask', 'amber'));
+
+  // ---- closing banner
+  const foot = h('div.h3-foot', bannerSkyline(), icon('lotus', 'lotus'),
+    h('div', h('b', t('home3.foot1'), h('i', { 'aria-hidden': 'true' }, ' • '), t('home3.foot2')), h('span', t('home3.footD'))));
+
+  view.append(hero, h('div.h3-body', search, quick, cities, ask, features, foot));
 }

@@ -1,6 +1,7 @@
 import { S, isConfigured, initClient, loadProfile, loadCategories, isAdmin, isScholarRole } from './store.js';
 import { t, getLang, setLang, initLang } from './i18n.js';
 import './i18n.v2.js';
+import './i18n.ui3.js';
 import { h, icon, logo, clear, toast } from './ui.js';
 
 const routes = [
@@ -37,6 +38,7 @@ async function render() {
   const route = routes.find(r => r.re.test(url.pathname));
   const params = route ? url.pathname.match(route.re).groups || {} : {};
   clear(view); view.className = 'fade-in'; window.scrollTo(0, 0);
+  document.body.classList.toggle('is-home', url.pathname === '/');
   paintNav(url.pathname);
   if (!isConfigured()) return renderSetup();
   if (offline) return renderOffline();
@@ -75,13 +77,14 @@ function renderSetup() {
 }
 
 // ---------------- bottom navigation ----------------
-const NAV = [['/', 'home', 'nav.home'], ['/explore', 'search', 'nav.explore'], ['/ask', 'plus', 'nav.ask'], ['/messages', 'chat', 'nav.messages'], ['/profile', 'user', 'nav.profile']];
+const NAV = [['/', 'home', 'nav.home'], ['/search', 'search', 'nav.search'], ['/saved', 'heart', 'nav.saved'], ['/consultations', 'calendar', 'nav.bookings'], ['/profile', 'user', 'nav.profile']];
 function activeFor(p) {
   if (p === '/') return '/';
-  if (p === '/ask') return '/ask';
-  if (p.startsWith('/messages')) return '/messages';
-  if (/^\/(explore|search|categories|qa|q\/|scholars|scholar\/|reels|consult\/)/.test(p)) return '/explore';
-  return '/profile';
+  if (p === '/saved') return '/saved';
+  if (/^\/(consultations|consult\/)/.test(p)) return '/consultations';
+  if (/^\/(explore|search|categories|qa|q\/|scholars|scholar\/|reels)/.test(p)) return '/search';
+  if (/^\/(profile|settings|my-questions|following|notifications|dashboard|admin|become-scholar|premium|login|signup|forgot|reset)/.test(p)) return '/profile';
+  return null;
 }
 function paintNav(path) {
   const a = activeFor(path);
@@ -98,7 +101,9 @@ function openDrawer() {
   const link = (href, ic, label) => h('a', { href }, icon(ic), label);
   const panel = h('nav.drawer', { 'aria-label': t('menu.open') },
     h('div.dhead', logo(40), h('b', 'Alfrzo Ilm'), h('div.spacer', { style: 'flex:1' }), h('button.iconbtn', { type: 'button', 'aria-label': t('cancel'), onclick: closeDrawer }, icon('x'))),
-    link('/', 'home', t('nav.home')), link('/ask', 'plus', t('home.ask')), link('/qa', 'qa', t('menu.browse')), link('/reels', 'video', t('menu.reels')),
+    link('/', 'home', t('nav.home')), link('/ask', 'plus', t('home.ask')), link('/qa', 'qa', t('menu.browse')),
+    S.user ? h('a', { href: '/messages' }, icon('chat'), t('menu.messages'), S.unreadMsgs > 0 ? h('span.tag.red', { style: 'margin-left:auto' }, String(S.unreadMsgs)) : null) : null,
+    link('/reels', 'video', t('menu.reels')),
     link('/scholars', 'scholars', t('menu.book')), S.user ? link('/consultations', 'calendar', t('menu.consults')) : null,
     isScholarRole() ? link('/dashboard', 'dash', t('dash.title')) : null, isAdmin() ? link('/admin', 'shield', t('admin.title')) : null,
     h('hr'), link('/premium', 'crown', t('menu.plans')), link('/privacy', 'info', t('menu.about')),
@@ -115,8 +120,8 @@ function openDrawer() {
 function buildShell(root) {
   clear(root);
   bellEl = h('a.iconbtn', { href: '/notifications', 'aria-label': t('nav.notifications') }, icon('bell'));
-  topbarEl = h('header.topbar', h('a.brand', { href: '/' }, logo(36), h('span', 'Alfrzo Ilm', h('small', t('tagline')))), h('div.spacer'), bellEl,
-    h('button.iconbtn', { type: 'button', 'aria-label': t('menu.open'), onclick: openDrawer }, icon('menu')));
+  topbarEl = h('header.topbar', h('button.iconbtn.menu', { type: 'button', 'aria-label': t('menu.open'), onclick: openDrawer }, icon('menu')),
+    h('a.brand', { href: '/' }, logo(34), h('span', 'Alfrzo Ilm', h('small', t('home3.tagline')))), bellEl);
   navEl = h('nav.bottomnav', { 'aria-label': 'Main' }, NAV.map(([href, ic, key]) =>
     href === '/ask'
       ? h('a.ask', { href }, h('span.fab', icon(ic)), h('em', t(key)))

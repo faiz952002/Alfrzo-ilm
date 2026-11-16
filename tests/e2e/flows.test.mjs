@@ -52,12 +52,17 @@ before(async () => {
 after(async () => { await browser?.close(); await stack?.stop(); if (VIDEO) fs.rmSync(VIDEO, { force: true }); if (errors.length) console.log('ERRORS SEEN:\n' + errors.join('\n')); });
 
 // ============================== shell, home, explore ==============================
-test('home opens in Hindi for a new visitor: brand, category stories with artwork, five-item bottom bar', async () => {
+test('home opens in Hindi for a new visitor: brand, topic tiles, popular cities, ask banner, five-item bottom bar', async () => {
   const { ctx, page } = await mk(null, 'hindi');
-  await go(page, '/'); await page.waitForSelector('.stories .story svg.art');
+  await go(page, '/'); await page.waitForSelector('.h3-quick .h3-tile');
   assert.equal(await page.evaluate(() => document.documentElement.lang), 'hi');
-  assert.match(await page.locator('.brand').innerText(), /Alfrzo Ilm/);
-  assert.ok((await page.locator('.stories .story').count()) >= 9);
+  assert.match(await page.locator('.h3-brand h1').innerText(), /Alfrzo Ilm/);
+  assert.equal(await page.locator('.h3-quick .h3-tile').count(), 5);
+  assert.match(await page.locator('.h3-quick').innerText(), /क़ुरआन/);
+  assert.equal(await page.locator('.h3-cities .h3-city').count(), 4);
+  assert.equal(await page.locator('form.h3-search input').count(), 1);
+  assert.equal(await page.locator('a.h3-ask[href="/ask"]').count(), 1);
+  assert.equal(await page.locator('.h3-feats .h3-feat').count(), 5);
   assert.equal(await page.locator('nav.bottomnav a').count(), 5);
   assert.match(await page.locator('nav.bottomnav').innerText(), /होम/);
   await shot(page, '01-home-empty-hi'); await ctx.close();
@@ -207,8 +212,9 @@ test('private answer: the asker reads it, a visitor cannot, and it is not in any
   assert.match(await page.locator('.qd').innerText(), /Private/); assert.match(await page.locator('article.ans').innerText(), /Inheritance shares depend/);
   const v = visitor.page;
   await go(v, '/q/' + qpriv); await v.waitForSelector('.empty'); assert.equal(await v.locator('article.ans').count(), 0);
-  await go(v, '/'); await v.waitForSelector('.card.post'); assert.equal(await v.locator('.card.post').count(), 1);
-  assert.ok(!(await v.locator('main').innerText()).includes('Inheritance shares'));
+  await go(v, '/qa'); await v.waitForSelector('.qrow'); assert.equal(await v.locator('.qrow').count(), 1, 'only the public question is listed');
+  assert.ok(!/inheritance/i.test(await v.locator('main').innerText()), 'private question and answer never appear in the public list');
+  await go(v, '/search?q=inheritance'); await v.waitForSelector('main .empty, main a.card.q'); assert.equal(await v.locator('main a.card.q').count(), 0, 'search never finds the private question');
   await go(v, '/scholar/' + SCH); await v.waitForSelector('.sp-head h1'); await v.waitForSelector('.card.q');
   assert.equal(await v.locator('.card.q').count(), 1, 'only the public answer is listed on the scholar profile');
 });
@@ -227,10 +233,11 @@ test('asker is notified, sees the best answer, marks it helpful, saves it and fo
   assert.equal(sql(`select count(*) from scholar_followers`), '1');
   assert.match(await page.locator('.sp-stats').innerText(), /1\s*followers/i);
   await go(page, '/saved'); await page.waitForSelector('.card');
-  // home now has "Aaj ka Sawal" and the answer feed
-  await go(page, '/'); await page.waitForSelector('.today h2'); await page.waitForSelector('.card.post');
-  assert.match(await page.locator('.today').innerText(), /zakat due on gold/);
-  await shot(page, '02-home');
+  // the home search finds the answered question
+  await go(page, '/'); await page.waitForSelector('form.h3-search input'); await shot(page, '02-home');
+  await page.fill('form.h3-search input', 'zakat'); await page.click('form.h3-search button.go');
+  await page.waitForFunction(() => location.pathname === '/search' && location.search.includes('zakat')); await page.waitForSelector('main a.card.q');
+  assert.match(await page.locator('main').innerText(), /zakat due on gold/);
 });
 
 // ============================== consultations + messages ==============================
