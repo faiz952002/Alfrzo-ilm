@@ -1,18 +1,14 @@
-// Photos for the home page. Put the image files in public/img/home/ and write their paths here.
-// While a value is null the home page shows a coded illustration in the same place and colours,
-// so the page never shows a broken image and never requests a missing file.
-//
-// Suggested sizes (JPG/WebP for photos, PNG with a transparent background for the scholar):
-//   hero      1200 x 760   night mosque scene, the left half kept calm for the text
-//   scholar    700 x 900   scholar reading, transparent PNG, facing left
-//   cities     480 x 320   one per city
+// Images for the home page, cut from the approved mockup (design/home-mockup.png) by
+// tools/extract_home_images.py. Printed texts were removed from them; the app draws the texts
+// itself (Hindi / English, clickable). Set any value to null to fall back to the coded illustration.
+const I = name => `/img/home/${name}.jpg`;
 export const HOME_IMAGES = {
-  hero: null,          // e.g. '/img/home/hero.jpg'
-  scholar: null,       // e.g. '/img/home/scholar.png'
-  cities: {
-    bengaluru: null,   // e.g. '/img/home/bengaluru.jpg'
-    hyderabad: null,
-    pune: null,
-    mumbai: null,
-  },
+  hero: I('hero'),
+  heroHasText: true,   // the hero photo already shows the logo, "Alfrzo Ilm" and the quote
+  scholar: null,       // the scholar is part of the hero photo
+  cities: { bengaluru: I('city-bengaluru'), hyderabad: I('city-hyderabad'), pune: I('city-pune'), mumbai: I('city-mumbai') },
+  tiles: { quran: I('tile-quran'), hadith: I('tile-hadith'), fiqah: I('tile-fiqah'), scholars: I('tile-scholars'), more: I('tile-more') },
+  feats: { chat: I('feat-chat'), reels: I('feat-reels'), profile: I('feat-profile'), consult: I('feat-consult'), ask: I('feat-ask') },
+  askBanner: I('ask-banner'),
+  footBanner: I('foot-banner'),
 };
