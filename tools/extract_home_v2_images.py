@@ -61,6 +61,9 @@ def main():
         else:
             vfill(t, 10, t.width - 10, l0, l1)
         save(t, f'cat-{name}.jpg')
+        if name == 'more':          # an empty tile (dots removed) for categories without their own picture
+            vfill(t, 10, t.width - 10, 30, l1)
+            save(t, 'cat-blank.jpg')
 
 
 if __name__ == '__main__':

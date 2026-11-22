@@ -71,8 +71,8 @@ test('home opens in Hindi for a new visitor: brand, category tiles, scholars, Qu
 
 test('explore shows every category as an illustrated tile; the side menu opens and closes', async () => {
   const { page } = visitor;
-  await go(page, '/explore'); await page.waitForSelector('.tiles .tile svg.art');
-  assert.equal(await page.locator('.tiles .tile').count(), Number(sql('select count(*) from categories where active')));
+  await go(page, '/explore'); await page.waitForSelector('.tiles .h4-cat');
+  assert.equal(await page.locator('.tiles .h4-cat').count(), Number(sql('select count(*) from categories where active')));
   await shot(page, '14-explore');
   await page.click('header.topbar button[aria-label="Menu"]'); await page.waitForSelector('nav.drawer');
   const menu = await page.locator('nav.drawer').innerText();
