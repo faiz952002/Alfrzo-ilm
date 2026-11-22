@@ -6,7 +6,7 @@ let seq = 0;
 // slug -> [sky top, sky bottom, artwork]. "ID" is replaced by a unique number for gradient / mask ids.
 const SCENES = {
   namaz: ['#2a2d6e', '#e8845c', `<circle cx="90" cy="28" r="11" fill="#ffe1a3"/>
-    <g fill="#17123a"><rect y="94" width="120" height="26"/><path d="M36 94c0-22 11-34 24-34s24 12 24 34z"/><rect x="58.6" y="44" width="2.8" height="16"/><circle cx="60" cy="42" r="3.2"/>
+    <g fill="#12223a"><rect y="94" width="120" height="26"/><path d="M36 94c0-22 11-34 24-34s24 12 24 34z"/><rect x="58.6" y="44" width="2.8" height="16"/><circle cx="60" cy="42" r="3.2"/>
     <rect x="20" y="52" width="8" height="44" rx="1.5"/><path d="M24 38l-6 14h12z"/><rect x="92" y="52" width="8" height="44" rx="1.5"/><path d="M96 38l-6 14h12z"/></g>
     <path d="M53 94V82a7 7 0 0 1 14 0v12z" fill="#ffc46b"/>`],
   roza: ['#0e1f45', '#1d5c7c', `<g fill="#fff" opacity=".85"><circle cx="20" cy="22" r="1.4"/><circle cx="44" cy="12" r="1"/><circle cx="104" cy="16" r="1.3"/><circle cx="108" cy="78" r="1"/><circle cx="14" cy="92" r="1"/></g>
@@ -55,13 +55,13 @@ export function catArt(slug) {
     <rect width="120" height="120" fill="url(#gID)"/>${art}`.replace(/ID/g, id));
 }
 
-// Wide dusk skyline used behind "Aaj ka Sawal" and on a scholar's profile.
+// Wide night skyline (royal blue sky, crescent, gold-lit mosque) used behind "Aaj ka Sawal" and on a scholar's profile.
 export function duskScene() {
   const id = ++seq;
-  return svg('0 0 400 220', 'dusk', `<defs><linearGradient id="dID" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1a2058"/><stop offset=".5" stop-color="#7d4577"/><stop offset=".82" stop-color="#ee9d62"/><stop offset="1" stop-color="#f7c57e"/></linearGradient></defs>
-    <rect width="400" height="220" fill="url(#dID)"/><circle cx="292" cy="170" r="50" fill="#ffe3a6" opacity=".55"/>
+  return svg('0 0 400 220', 'dusk', `<defs><linearGradient id="dID" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#091a44"/><stop offset=".55" stop-color="#12346e"/><stop offset=".85" stop-color="#1d5a8a"/><stop offset="1" stop-color="#2a7aa0"/></linearGradient></defs>
+    <rect width="400" height="220" fill="url(#dID)"/><circle cx="318" cy="52" r="18" fill="#ffe7a8"/><circle cx="326" cy="46" r="16" fill="#12346e"/>
     <g fill="#fff" opacity=".8"><circle cx="40" cy="30" r="1.5"/><circle cx="120" cy="18" r="1.2"/><circle cx="210" cy="36" r="1.3"/><circle cx="330" cy="22" r="1.5"/><circle cx="372" cy="58" r="1.1"/><circle cx="76" cy="66" r="1"/></g>
-    <g fill="#140e30"><rect y="186" width="400" height="34"/>
+    <g fill="#06122e"><rect y="186" width="400" height="34"/>
       <path d="M150 186c0-36 22-56 50-56s50 20 50 56z"/><rect x="198" y="104" width="4" height="26"/><circle cx="200" cy="101" r="5"/>
       <rect x="112" y="96" width="12" height="92" rx="2"/><path d="M118 72l-9 24h18z"/><rect x="276" y="96" width="12" height="92" rx="2"/><path d="M282 72l-9 24h18z"/>
       <path d="M40 186c0-20 13-32 30-32s30 12 30 32z"/><path d="M300 186c0-20 13-32 30-32s30 12 30 32z"/>

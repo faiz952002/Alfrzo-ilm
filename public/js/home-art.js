@@ -26,30 +26,30 @@ function mosque(x, y, k, body, glow) {
 // Hero: violet dusk sky, crescent, stars, lit mosque reflected in water, palms, a glowing lantern.
 export function heroScene() {
   const stars = Array.from({ length: 34 }, (_, i) => `<circle cx="${(i * 97) % 400}" cy="${(i * 53) % 120 + 6}" r="${i % 5 ? .7 : 1.3}" fill="#fff" opacity="${.35 + (i % 4) * .15}"/>`).join('');
-  const palms = (px, s) => `<g transform="translate(${px} 222) scale(${s})" fill="#120d24"><rect x="-1.4" y="-40" width="2.8" height="40"/><path d="M0-40c-10-6-22-4-28 2 9-2 17-1 28-2zM0-40c10-6 22-4 28 2-9-2-17-1-28-2zM0-40c-5-9-15-12-23-10 8 2 15 5 23 10zM0-40c5-9 15-12 23-10-8 2-15 5-23 10z"/></g>`;
+  const palms = (px, s) => `<g transform="translate(${px} 222) scale(${s})" fill="#0d1624"><rect x="-1.4" y="-40" width="2.8" height="40"/><path d="M0-40c-10-6-22-4-28 2 9-2 17-1 28-2zM0-40c10-6 22-4 28 2-9-2-17-1-28-2zM0-40c-5-9-15-12-23-10 8 2 15 5 23 10zM0-40c5-9 15-12 23-10-8 2-15 5-23 10z"/></g>`;
   return svg('0 0 400 300', `
-    <defs><linearGradient id="skyID" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#16112f"/><stop offset=".45" stop-color="#36265a"/><stop offset=".78" stop-color="#7a4a6e"/><stop offset="1" stop-color="#d08a63"/></linearGradient>
-      <linearGradient id="waterID" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a1d45"/><stop offset="1" stop-color="#0e0a1e"/></linearGradient>
+    <defs><linearGradient id="skyID" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#111d2f"/><stop offset=".45" stop-color="#263b5a"/><stop offset=".78" stop-color="#7a4a6e"/><stop offset="1" stop-color="#d08a63"/></linearGradient>
+      <linearGradient id="waterID" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1d2d45"/><stop offset="1" stop-color="#0a121e"/></linearGradient>
       <radialGradient id="lampID"><stop offset="0" stop-color="#ffd38a" stop-opacity=".95"/><stop offset="1" stop-color="#ffb347" stop-opacity="0"/></radialGradient>
       <radialGradient id="hazeID" cx=".62" cy=".72" r=".5"><stop offset="0" stop-color="#ffb46a" stop-opacity=".45"/><stop offset="1" stop-color="#ffb46a" stop-opacity="0"/></radialGradient></defs>
     <rect width="400" height="300" fill="url(#skyID)"/><rect width="400" height="300" fill="url(#hazeID)"/>${stars}
     <mask id="moonID"><rect width="400" height="300" fill="#fff"/><circle cx="306" cy="92" r="11" fill="#000"/></mask>
     <circle cx="300" cy="96" r="12" fill="#ffe6ad" mask="url(#moonID)"/>
-    <g opacity=".32">${mosque(150, 118, .62, '#2a1f4a', '#ffcf7a')}</g>
-    ${mosque(250, 112, 1.05, '#1d1638', '#ffc86b')}
+    <g opacity=".32">${mosque(150, 118, .62, '#1f304a', '#ffcf7a')}</g>
+    ${mosque(250, 112, 1.05, '#162438', '#ffc86b')}
     ${palms(118, 1)}${palms(352, 1.15)}${palms(380, .9)}
     <rect y="222" width="400" height="78" fill="url(#waterID)"/>
-    <g opacity=".22" transform="translate(0 444) scale(1 -1)">${mosque(250, 112, 1.05, '#1d1638', '#ffc86b')}</g>
+    <g opacity=".22" transform="translate(0 444) scale(1 -1)">${mosque(250, 112, 1.05, '#162438', '#ffc86b')}</g>
     <g stroke="#ffcf7a" stroke-opacity=".35" stroke-width="1.2">${[232, 246, 258, 272].map((yy, i) => `<path d="M${200 + i * 6} ${yy}h${80 - i * 14}"/>`).join('')}</g>
     <circle cx="18" cy="268" r="30" fill="url(#lampID)"/>
     <g transform="translate(18 254) scale(.6)"><path d="M0-22v8" stroke="#c99a4a" stroke-width="2"/><path d="M-14-14h28l-4 6h-20z" fill="#8a6326"/>
       <path d="M-12-8h24v46h-24z" fill="#ffcf7a" opacity=".9"/><path d="M-12-8h24v46h-24z M0-8v46 M-12 15h24" fill="none" stroke="#7a5420" stroke-width="2.2"/>
       <path d="M-15 38h30l-3 6h-24z" fill="#8a6326"/></g>
-    <rect x="10" y="284" width="70" height="16" fill="#120d24" opacity=".9"/>`, 'hero-art', 'xMidYMax slice');
+    <rect x="10" y="284" width="70" height="16" fill="#0d1624" opacity=".9"/>`, 'hero-art', 'xMidYMax slice');
 }
 
 const SAND = ['#e2b47a', '#b98451', '#8a5a33'];
-function cityFrame(art, sky = ['#3a2b5e', '#c98a62', '#f2c27f']) {
+function cityFrame(art, sky = ['#2b3f5e', '#c98a62', '#f2c27f']) {
   return svg('0 0 160 110', `<defs><linearGradient id="cID" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${sky[0]}"/><stop offset=".6" stop-color="${sky[1]}"/><stop offset="1" stop-color="${sky[2]}"/></linearGradient></defs>
     <rect width="160" height="110" fill="url(#cID)"/>${art}<rect y="96" width="160" height="14" fill="#3b2a24"/>`, 'city-art', 'xMidYMax slice');
 }
@@ -81,7 +81,7 @@ export const cityArt = key => cityFrame(CITY_ART[key] || CITY_ART.mumbai);
 // Scholar figure for the "Ask a Scholar" banner: white cap and kurta, dark beard, coat.
 export function scholarFigure() {
   return svg('0 0 100 100', `<defs><linearGradient id="kID" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f5f2ea"/><stop offset="1" stop-color="#b9b3a6"/></linearGradient></defs>
-    <path d="M14 100c2-20 16-30 36-30s34 10 36 30z" fill="url(#kID)"/><path d="M38 72l12 28 12-28-12 6z" fill="#2a2240"/><path d="M46 78l4 22 4-22z" fill="#e9e4d8"/>
+    <path d="M14 100c2-20 16-30 36-30s34 10 36 30z" fill="url(#kID)"/><path d="M38 72l12 28 12-28-12 6z" fill="#222e40"/><path d="M46 78l4 22 4-22z" fill="#e9e4d8"/>
     <path d="M33 34c0 14 7 26 17 26s17-12 17-26z" fill="#c69a7a"/><path d="M32 40c0 18 8 34 18 34s18-16 18-34c-4 8-10 11-18 11s-14-3-18-11z" fill="#1d1a26"/>
     <path d="M40 49c3 2 7 3 10 3s7-1 10-3" stroke="#c69a7a" stroke-width="2.2" fill="none"/>
     <path d="M31 31c0-11 8-17 19-17s19 6 19 17z" fill="#fbfaf6"/><rect x="31" y="29" width="38" height="5" rx="2" fill="#e6e1d4"/>`, 'scholar-art', 'xMidYMid meet');
@@ -89,5 +89,5 @@ export function scholarFigure() {
 
 // Small mosque skyline for banners (right side, faded).
 export function bannerSkyline() {
-  return svg('0 0 240 80', `<g opacity=".9">${mosque(150, 4, .62, '#1a1433', '#e9b35f')}${mosque(206, 18, .48, '#1a1433', '#e9b35f')}${mosque(96, 26, .4, '#221a3e', '#c9964d')}</g>`, 'banner-sky', 'xMaxYMax slice');
+  return svg('0 0 240 80', `<g opacity=".9">${mosque(150, 4, .62, '#142033', '#e9b35f')}${mosque(206, 18, .48, '#142033', '#e9b35f')}${mosque(96, 26, .4, '#1a283e', '#c9964d')}</g>`, 'banner-sky', 'xMaxYMax slice');
 }

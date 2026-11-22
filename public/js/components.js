@@ -104,3 +104,9 @@ export function scholarCard(s, followed, onFollow) {
       h('div.small.muted', s.specialties?.length ? s.specialties.join(' · ') : s.qualifications),
       h('div.small.muted', `${s.answers_count} ${t('answers')} · ${s.followers_count} ${t('followers')}`)), btn);
 }
+
+// Category tile with the picture from the home mockup (public/img/home2); categories without one get an empty tile + their icon.
+const TILE_IMG = new Set(['aqeedah', 'namaz', 'roza', 'zakat', 'nikah', 'family', 'hajj', 'akhlaq', 'quran-hadith']);
+export const catTile = c => TILE_IMG.has(c.slug)
+  ? h('a.h4-cat', { href: `/qa?cat=${c.slug}`, style: `background-image:url("/img/home2/cat-${c.slug.split('-')[0]}.jpg")` }, h('span', catName(c)))
+  : h('a.h4-cat.plain', { href: `/qa?cat=${c.slug}`, style: 'background-image:url("/img/home2/cat-blank.jpg")' }, h('i', { 'aria-hidden': 'true' }, c.icon), h('span', catName(c)));

@@ -1,9 +1,7 @@
-import { S, catName } from '../store.js';
+import { S } from '../store.js';
 import { t } from '../i18n.js';
 import { h, icon, clear } from '../ui.js';
-import { scholarCard, skeletons } from '../components.js';
-// categories that have a tile picture from the home mockup (public/img/home2); others keep their drawing
-const TILE_IMG = new Set(['aqeedah', 'namaz', 'roza', 'zakat', 'nikah', 'family', 'hajj', 'akhlaq', 'quran-hadith']);
+import { scholarCard, skeletons, catTile } from '../components.js';
 
 export default async function explore(view, ctx) {
   ctx.setTitle(t('nav.explore'), t('meta.feed'));
@@ -14,9 +12,7 @@ export default async function explore(view, ctx) {
   view.append(h('div.page-title', h('h1', t('nav.explore'))), form,
     h('div.section-h', h('h2', t('ex.popular')), h('a', { href: '/qa?tab=popular' }, t('viewall'))), popular,
     h('div.section-h', h('h2', t('ex.cats'))),
-    h('div.tiles.v2', S.cats.map(c => TILE_IMG.has(c.slug)
-      ? h('a.h4-cat', { href: `/qa?cat=${c.slug}`, style: `background-image:url("/img/home2/cat-${c.slug.split('-')[0]}.jpg")` }, h('span', catName(c)))
-      : h('a.h4-cat.plain', { href: `/qa?cat=${c.slug}`, style: 'background-image:url("/img/home2/cat-blank.jpg")' }, h('i', { 'aria-hidden': 'true' }, c.icon), h('span', catName(c))))),
+    h('div.tiles.v2', S.cats.map(catTile)),
     h('div.section-h', h('h2', t('ex.scholars')), h('a', { href: '/scholars' }, t('viewall'))), scholars,
     h('div', { style: 'margin:14px 0' }, h('a.btn.ghost.block', { href: '/reels' }, icon('video'), t('home.reels'))));
 
