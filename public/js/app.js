@@ -121,7 +121,7 @@ function buildShell(root) {
   clear(root);
   bellEl = h('a.iconbtn', { href: '/notifications', 'aria-label': t('nav.notifications') }, icon('bell'));
   topbarEl = h('header.topbar', h('button.iconbtn.menu', { type: 'button', 'aria-label': t('menu.open'), onclick: openDrawer }, icon('menu')),
-    h('a.brand', { href: '/' }, logo(34), h('span', 'Alfrzo Ilm', h('small', t('home3.tagline')))), bellEl);
+    h('a.brand', { href: '/' }, h('img.brand-logo', { src: '/img/home2/logo.png', alt: '', width: 36, height: 37 }), h('span', 'Alfrzo ', h('em', 'Ilm'), h('small', t('home3.tagline')))), bellEl);
   navEl = h('nav.bottomnav', { 'aria-label': 'Main' }, NAV.map(([href, ic, key]) =>
     href === '/ask'
       ? h('a.ask', { href }, h('span.fab', icon(ic)), h('em', t(key)))

@@ -52,17 +52,18 @@ before(async () => {
 after(async () => { await browser?.close(); await stack?.stop(); if (VIDEO) fs.rmSync(VIDEO, { force: true }); if (errors.length) console.log('ERRORS SEEN:\n' + errors.join('\n')); });
 
 // ============================== shell, home, explore ==============================
-test('home opens in Hindi for a new visitor: brand, topic tiles, popular cities, ask banner, five-item bottom bar', async () => {
+test('home opens in Hindi for a new visitor: brand, category tiles, scholars, Quran banner, five-item bottom bar', async () => {
   const { ctx, page } = await mk(null, 'hindi');
-  await go(page, '/'); await page.waitForSelector('.h3-quick .h3-tile');
+  await go(page, '/'); await page.waitForSelector('.h4-cats .h4-cat');
   assert.equal(await page.evaluate(() => document.documentElement.lang), 'hi');
-  assert.match(await page.locator('.h3-brand h1').innerText(), /Alfrzo Ilm/);
-  assert.equal(await page.locator('.h3-quick .h3-tile').count(), 5);
-  assert.match(await page.locator('.h3-quick').innerText(), /क़ुरआन/);
-  assert.equal(await page.locator('.h3-cities .h3-city').count(), 4);
-  assert.equal(await page.locator('form.h3-search input').count(), 1);
-  assert.equal(await page.locator('a.h3-ask[href="/ask"]').count(), 1);
-  assert.equal(await page.locator('.h3-feats .h3-feat').count(), 5);
+  assert.match(await page.locator('.h4-hero h1').innerText(), /Alfrzo Ilm/);
+  assert.equal(await page.locator('.h4-cats .h4-cat').count(), 10);
+  assert.match(await page.locator('.h4-cats').innerText(), /नमाज़/);
+  assert.equal(await page.locator('.h4-cats a[href="/qa?cat=zakat"]').count(), 1);
+  assert.equal(await page.locator('form.h4-search input').count(), 1);
+  assert.equal(await page.locator('a.h4-explore[href="/explore"]').count(), 1);
+  assert.equal(await page.locator('a.h4-banner[href="/qa?cat=quran-hadith"]').count(), 1);
+  await page.waitForSelector('.h4-sch-row .h4-scholar:not(.skel)');
   assert.equal(await page.locator('nav.bottomnav a').count(), 5);
   assert.match(await page.locator('nav.bottomnav').innerText(), /होम/);
   await shot(page, '01-home-empty-hi'); await ctx.close();
@@ -234,8 +235,8 @@ test('asker is notified, sees the best answer, marks it helpful, saves it and fo
   assert.match(await page.locator('.sp-stats').innerText(), /1\s*followers/i);
   await go(page, '/saved'); await page.waitForSelector('.card');
   // the home search finds the answered question
-  await go(page, '/'); await page.waitForSelector('form.h3-search input'); await shot(page, '02-home');
-  await page.fill('form.h3-search input', 'zakat'); await page.click('form.h3-search button.go');
+  await go(page, '/'); await page.waitForSelector('form.h4-search input'); await shot(page, '02-home');
+  await page.fill('form.h4-search input', 'zakat'); await page.click('form.h4-search button.go');
   await page.waitForFunction(() => location.pathname === '/search' && location.search.includes('zakat')); await page.waitForSelector('main a.card.q');
   assert.match(await page.locator('main').innerText(), /zakat due on gold/);
 });

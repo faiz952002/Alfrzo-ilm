@@ -1,68 +1,56 @@
-import { S } from '../store.js';
+import { S, catName } from '../store.js';
 import { t } from '../i18n.js';
 import '../i18n.ui3.js';
-import { h, icon, logo } from '../ui.js';
-import { heroScene, cityArt, scholarFigure, bannerSkyline } from '../home-art.js';
-import { HOME_IMAGES as IMG } from '../home-images.js';
+import { h, icon } from '../ui.js';
+import { scholarFigure } from '../home-art.js';
 
-// Night & gold home: hero, search, quick topics, popular cities, ask a scholar, features, closing banner.
-// Every tile links to an existing page; nothing here needs new database tables.
-// Images come from home-images.js; where one is missing a coded illustration is drawn instead.
-const CITIES = [['bengaluru', 'Bengaluru'], ['hyderabad', 'Hyderabad'], ['pune', 'Pune'], ['mumbai', 'Mumbai']];
-const bg = src => `background-image:url("${src}")`;
+// Home (mockup v2: design/home-mockup-v2.png): hero, search, popular categories, our scholars, Quran & Hadith banner.
+// Images come from tools/extract_home_v2_images.py. Every tile links to an existing page.
+// "Our Scholars" lists the verified scholars from the database (never the people pictured in the mockup).
+const IMG = name => `/img/home2/${name}.jpg`;
+const CATS = ['aqeedah', 'namaz', 'roza', 'zakat', 'nikah', 'family', 'hajj', 'akhlaq', 'quran-hadith'];
 
 export default async function home(view, ctx) {
   ctx.setTitle(null, t('meta.home'));
-  const photo = (src, cls) => h('img', { src, class: cls, alt: '', decoding: 'async' });
 
-  // ---- hero (menu + bell come from the shell, laid over it)
-  const baked = !!(IMG.hero && IMG.heroHasText);          // the photo already shows logo, name and quote
-  const hero = h('section.h3-hero' + (baked ? '.photo' : ''),
-    IMG.hero ? photo(IMG.hero, 'hero-art') : heroScene(),
-    IMG.scholar ? photo(IMG.scholar, 'hero-scholar') : null,
-    h('div.h3-brand' + (baked ? '.sr-only' : ''), logo(58), h('h1', 'Alfrzo Ilm'), h('p.h3-tag', h('span', { 'aria-hidden': 'true' }), t('home3.tagline'), h('span', { 'aria-hidden': 'true' }))),
-    h('p.h3-quote' + (baked ? '.sr-only' : ''), h('span.l1', t('home3.q1')), h('span.l2', t('home3.q2')), h('span.orn', { 'aria-hidden': 'true' })));
+  // ---- hero: the picture already shows "Learn Islam / Live Better" and the Explore button
+  const hero = h('section.h4-hero', { style: `background-image:url("${IMG('hero')}")` },
+    h('div.sr-only', h('h1', 'Alfrzo Ilm'), h('p', t('home3.q1') + ' – ' + t('home3.q2')), h('p', t('home4.k'))),
+    h('a.h4-explore', { href: '/explore' }, h('span.sr-only', t('home4.explore'))));
 
   // ---- search
   const input = h('input', { type: 'search', placeholder: t('home3.search'), 'aria-label': t('home3.search'), maxlength: 100, enterkeyhint: 'search' });
-  const search = h('form.h3-search', { role: 'search', onsubmit: e => {
+  const search = h('form.h4-search', { role: 'search', onsubmit: e => {
     e.preventDefault(); const q = input.value.trim(); S.go('/search' + (q ? '?q=' + encodeURIComponent(q) : ''));
   } }, icon('search', 'i'), input, h('button.go', { type: 'submit', 'aria-label': t('home3.searchgo') }, icon('arrowRs')));
 
-  // ---- quick topics
-  const tile = (href, key, ic, label, tone) => IMG.tiles?.[key]
-    ? h('a.h3-tile.img', { href, style: bg(IMG.tiles[key]) }, h('span', t(label)))
-    : h(`a.h3-tile.${tone}`, { href }, icon(ic), h('span', t(label)));
-  const quick = h('nav.h3-panel.h3-quick', { 'aria-label': t('home.cats') },
-    tile('/qa?cat=quran-hadith', 'quran', 'quran', 'tile.quran', 'green'), tile('/qa?cat=quran-hadith', 'hadith', 'dome', 'tile.hadith', 'amber'),
-    tile('/categories', 'fiqah', 'scales', 'tile.fiqah', 'violet'), tile('/scholars', 'scholars', 'scholar', 'tile.scholars', 'blue'), tile('/explore', 'more', 'grid', 'tile.more', 'slate'));
+  const head = (title, href) => h('div.h4-head', h('h2', title), h('a', { href }, t('home3.viewall'), ' ', icon('arrowRs')));
 
-  // ---- popular cities (opens a search for the city name)
-  const cities = h('section.h3-panel.h3-cities',
-    h('div.h3-head', icon('pin', 'pin'), h('h2', t('home3.cities')), h('a', { href: '/search' }, t('home3.viewall'), ' ', icon('arrowRs'))),
-    h('div.h3-city-row', CITIES.map(([key, q]) => h('a.h3-city' + (IMG.cities?.[key] ? '.img' : ''), { href: '/search?q=' + encodeURIComponent(q) },
-      IMG.cities?.[key] ? photo(IMG.cities[key], 'city-art') : cityArt(key), h('span', t('city.' + key))))));
+  // ---- popular categories (labels come from the database, so they follow the language)
+  const label = slug => slug === 'quran-hadith' ? t('tile.quran') : catName(S.cats.find(c => c.slug === slug)) || slug;
+  const tiles = CATS.map(slug => h('a.h4-cat', { href: '/qa?cat=' + slug, style: `background-image:url("${IMG('cat-' + slug.split('-')[0])}")` }, h('span', label(slug))));
+  tiles.push(h('a.h4-cat', { href: '/categories', style: `background-image:url("${IMG('cat-more')}")` }, h('span', t('tile.more'))));
+  const cats = h('section.h4-sec', head(t('home4.cats'), '/categories'), h('nav.h4-cats', { 'aria-label': t('home4.cats') }, tiles));
 
-  // ---- ask a scholar
-  const askText = h('span.txt', h('b.ttl', t('home3.askT')), h('span.sub', t('home3.askD')), h('span.h3-pill', t('home3.askB'), ' ', icon('arrowRs')));
-  const ask = IMG.askBanner
-    ? h('a.h3-ask.img', { href: '/ask', style: bg(IMG.askBanner) }, askText)
-    : h('a.h3-ask', { href: '/ask' }, bannerSkyline(), h('span.fig', scholarFigure()), askText);
+  // ---- our scholars (verified scholars from the database)
+  const row = h('div.h4-sch-row');
+  const scroll = dir => () => row.scrollBy({ left: dir * row.clientWidth * 0.8, behavior: 'smooth' });
+  const scholars = h('section.h4-sec', head(t('home4.scholars'), '/scholars'),
+    h('div.h4-sch', h('button.h4-arrow.prev', { type: 'button', 'aria-label': t('home4.prev'), onclick: scroll(-1) }, icon('arrowRs')), row,
+      h('button.h4-arrow.next', { type: 'button', 'aria-label': t('home4.next'), onclick: scroll(1) }, icon('arrowRs'))));
+  for (let i = 0; i < 4; i++) row.append(h('div.h4-scholar.skel', h('span.fig'), h('b', ' ')));
 
-  // ---- features
-  const unread = S.unreadMsgs > 0 ? h('span.badge-dot', S.unreadMsgs > 9 ? '9+' : String(S.unreadMsgs)) : null;
-  const feat = (href, key, ic, label, tone, extra) => IMG.feats?.[key]
-    ? h('a.h3-feat.img', { href, style: bg(IMG.feats[key]) }, h('span', t(label)), extra)
-    : h(`a.h3-feat.${tone}`, { href }, icon(ic), h('span', t(label)), extra);
-  const features = h('nav.h3-feats', { 'aria-label': t('menu.open') },
-    feat('/messages', 'chat', 'chat', 'feat.chat', 'violet', unread), feat('/reels', 'reels', 'video', 'feat.reels', 'red'), feat('/profile', 'profile', 'user', 'feat.profile', 'blue'),
-    feat('/scholars', 'consult', 'headset', 'feat.consult', 'green'), feat('/ask', 'ask', 'help', 'feat.ask', 'amber'));
+  // ---- Quran & Hadith banner (text is part of the picture)
+  const banner = h('a.h4-banner', { href: '/qa?cat=quran-hadith', style: `background-image:url("${IMG('banner-quran')}")` },
+    h('span.sr-only', t('home4.qhT') + ' – ' + t('home4.qhD') + ' – ' + t('home4.qhB')));
 
-  // ---- closing banner
-  const footText = h('div', h('b', t('home3.foot1'), h('i', { 'aria-hidden': 'true' }, ' • '), t('home3.foot2')), h('span', t('home3.footD')));
-  const foot = IMG.footBanner
-    ? h('div.h3-foot.img', { style: bg(IMG.footBanner) }, footText)
-    : h('div.h3-foot', bannerSkyline(), icon('lotus', 'lotus'), footText);
+  view.append(hero, h('div.h4-body', search, cats, scholars, banner));
 
-  view.append(hero, h('div.h3-body', search, quick, cities, ask, features, foot));
+  const r = await S.sb.from('scholar_directory').select('id,display_name,qualifications').order('answers_count', { ascending: false }).limit(12);
+  if (!ctx.alive()) return;
+  row.replaceChildren();
+  const list = r.error ? [] : r.data || [];
+  list.forEach(s => row.append(h('a.h4-scholar', { href: `/scholar/${s.id}` }, h('span.fig', scholarFigure()), h('b', s.display_name))));
+  if (!list.length) row.append(h('a.h4-scholar.empty', { href: S.user ? '/become-scholar' : '/scholars' }, h('span.fig', scholarFigure()), h('b', t('home4.none')), S.user && !S.scholar ? h('small', t('home4.join')) : null));
+  scholars.classList.toggle('few', list.length < 4);
 }
