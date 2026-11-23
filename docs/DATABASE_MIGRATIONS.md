@@ -10,7 +10,8 @@ All database setup lives in `supabase/migrations/`. Run the files **in number or
 | 003 | `003_scholar_applications_and_payments.sql` | Scholar applications, server-only payment functions, abuse limits | safe to re-run; refuses if 002 is missing |
 | 004 | `004_private_questions_consultations_chat_reels.sql` | Private questions, consultations, chat, reels, `reels` bucket | safe to re-run; refuses if 003 is missing |
 | 005 | `005_security_hardening.sql` | **New.** Exact permissions, function allow-list, profiles for users who signed up early | safe to re-run (always ends in the same state) |
-| – | `../DATABASE_HEALTH_CHECK.sql` | **Read-only.** 20 checks; every row must be `true` | always safe |
+| 006 | `006_phase1_fixes.sql` | Phase 1 fixes (the SQL of `patch_004.sql`, unchanged) + exact permissions for what it adds | refuses: `ALREADY_APPLIED`; refuses `MISSING_PREVIOUS` if 005 is missing |
+| – | `../DATABASE_HEALTH_CHECK.sql` | **Read-only.** 20 checks for a project with **001–006**; every row must be `true` | always safe |
 
 ## Relation to the old files
 
@@ -43,15 +44,43 @@ both cases: exactly the 96 intended table/column permissions and an explicit fun
 | 002 on an empty project | refuses (`MISSING_PREVIOUS`), 0 objects created |
 | Users who signed up before setup | profiles created by 005 |
 | Old 4 files without 005 on Supabase-like defaults | health check **16/20** (it detects the extra permissions) |
-| Future Phase 1 patch (`patch_004.sql`) on top of 001–005 | applies, its 11 tests pass |
+| Phase 1 patch (`patch_004.sql`) run directly on top of 001–005 | applies, but health check **17/20**: it leaves the new 2-hour helper open and the old check did not know the new rules → use **006** instead |
+
+## 006 – Phase 1 fixes
+
+`006_phase1_fixes.sql` = the unchanged SQL of `patch_004.sql` between a guard and a permissions block:
+
+| Object added / changed | Visitors (`anon`) | Logged-in users | Why |
+|---|---|---|---|
+| `consultation_housekeeping()` | ✅ run | ✅ run | the booking page (open to visitors) and "My bookings" free expired unpaid holds first |
+| `consultation_cancel_cutoff()` (2-hour rule) | ❌ | ❌ | used only inside `cancel_consultation()` and the `consultation_list` view |
+| `reel_viewed(uuid)` | ❌ (was ✅) | ✅ run | M3: views are counted for logged-in users only, once per person |
+| table `reel_views` | ❌ | ❌ | RLS on, no policies; only `reel_viewed()` writes it |
+| view `consultation_list` (+ `can_cancel`) | ❌ | ✅ read | rows limited to the caller inside the view |
+| trigger functions `answers_sync_counts`, `questions_before_delete` | ❌ | ❌ | run by the database only |
+
+Guard: refuses (and changes nothing) when 005 has not run (`MISSING_PREVIOUS`) or when 006 is already complete (`ALREADY_APPLIED`).
+A project that ran the raw `patch_004.sql` after 005 may still run 006: it re-applies the same SQL and fixes the permissions.
+
+Tested locally (PostgreSQL 16 + Supabase stand-in, plain **and** Supabase-style default permissions; not on a real Supabase project):
+
+| Test | Result |
+|---|---|
+| Fresh project 000 → 001…006 | health check **20/20** |
+| 001–005 **with data**, then 006 | 13/20 before → **20/20** after, **no rows lost** |
+| 006 a second time | refuses `ALREADY_APPLIED`, schema **unchanged** |
+| 006 before 005 (after 004) | refuses `MISSING_PREVIOUS`, schema **unchanged** |
+| 006 on an empty project | refuses `MISSING_PREVIOUS` |
+| 001–005 + raw `patch_004.sql`, then 006 | 17/20 → **20/20** |
+| Health check detects: helper opened to visitors or users, `reel_viewed` opened to visitors or closed to users, housekeeping closed, `reel_views` / `consultation_list` readable by visitors | each one fails the right check |
 
 ## Adding a migration later
 
 1. Create the next number, e.g. `006_<what>.sql`, inside `begin; … commit;`, with a guard if it must not run twice.
-2. Every new function needs an explicit `grant execute … to <role>` (the allow-list in 005 removes default access).
-   Add it to the lists in `005_security_hardening.sql` **and** `DATABASE_HEALTH_CHECK.sql` (checks 3, 12, 13).
+2. Every new function needs an explicit `revoke … from public, anon, authenticated` and then `grant execute … to <role>` **in the new
+   migration itself** (as 006 does), and the matching update of `DATABASE_HEALTH_CHECK.sql` (checks 3, 12, 13, 15).
 3. Every new table: `enable row level security`, policies, and explicit grants; add it to the health check.
 4. Test locally (`tests/reset-db.sh`, `npm run test:db`, `npm run test:e2e`) before running it on Supabase.
 
-Example: Phase 1's `patch_004.sql` adds `consultation_housekeeping()` and `consultation_cancel_cutoff()`. The health check flags them
-until they are added to the allow-list – that is intended.
+Example: 006 adds `consultation_housekeeping()` (visitors + users) and `consultation_cancel_cutoff()` (no direct access), and the
+health check lists both.
