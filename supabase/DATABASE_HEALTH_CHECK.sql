@@ -157,6 +157,12 @@ miss(nr, area, item, list) as (values
         ('questions_before_insert: suspension + image path', coalesce((select def like '%BAD_IMAGE_PATH%' and def like '%SUSPENDED%' from f where proname = 'questions_before_insert'), false)),
         ('H2 cancel_consultation uses the 2-hour rule', coalesce((select def like '%consultation_cancel_cutoff%' from f where proname = 'cancel_consultation'), false)),
         ('H2 consultation_list shows can_cancel', exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'consultation_list' and column_name = 'can_cancel')),
+        ('H2 bookings view: same 2-hour rule as consultation_cancel_cutoff, without calling it', coalesce((
+           select v.viewdef not like '%consultation_cancel_cutoff%'
+              and (regexp_match(v.viewdef, $r$starts_at - '([^']+)'::interval$r$))[1]::interval
+                = (regexp_match(fn.def, $r$interval '([^']+)'$r$))[1]::interval
+             from (select pg_get_viewdef('public.consultation_list'::regclass) as viewdef) v,
+                  (select def from f where proname = 'consultation_cancel_cutoff') fn), false)),
         ('M1 open times may not overlap', coalesce((select def like '%SLOT_OVERLAP%' from f where proname = 'scholar_slots_before_insert'), false)),
         ('M2 booking runs housekeeping first', coalesce((select def like '%consultation_housekeeping%' from f where proname = 'book_consultation'), false)),
         ('M3 one reel view per person', coalesce((select def like '%reel_views%' from f where proname = 'reel_viewed'), false)),

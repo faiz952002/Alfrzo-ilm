@@ -44,7 +44,7 @@ both cases: exactly the 96 intended table/column permissions and an explicit fun
 | 002 on an empty project | refuses (`MISSING_PREVIOUS`), 0 objects created |
 | Users who signed up before setup | profiles created by 005 |
 | Old 4 files without 005 on Supabase-like defaults | health check **16/20** (it detects the extra permissions) |
-| Phase 1 patch (`patch_004.sql`) run directly on top of 001–005 | applies, but health check **17/20**: it leaves the new 2-hour helper open and the old check did not know the new rules → use **006** instead |
+| Phase 1 patch (`patch_004.sql`) run directly on top of 001–005 | applies, but health check **16/20**: it leaves the new 2-hour helper open and the old check did not know the new rules → use **006** instead |
 
 ## 006 – Phase 1 fixes
 
@@ -53,10 +53,10 @@ both cases: exactly the 96 intended table/column permissions and an explicit fun
 | Object added / changed | Visitors (`anon`) | Logged-in users | Why |
 |---|---|---|---|
 | `consultation_housekeeping()` | ✅ run | ✅ run | the booking page (open to visitors) and "My bookings" free expired unpaid holds first |
-| `consultation_cancel_cutoff()` (2-hour rule) | ❌ | ❌ | used only inside `cancel_consultation()` and the `consultation_list` view |
+| `consultation_cancel_cutoff()` (2-hour rule) | ❌ | ❌ | used only inside `cancel_consultation()` (runs with owner rights) |
 | `reel_viewed(uuid)` | ❌ (was ✅) | ✅ run | M3: views are counted for logged-in users only, once per person |
 | table `reel_views` | ❌ | ❌ | RLS on, no policies; only `reel_viewed()` writes it |
-| view `consultation_list` (+ `can_cancel`) | ❌ | ✅ read | rows limited to the caller inside the view |
+| view `consultation_list` (+ `can_cancel`) | ❌ | ✅ read | rows limited to the caller inside the view; the 2-hour rule is written in (`interval '2 hours'`) because a function called inside a view is checked against the reader, and the helper is closed. The health check fails if the view and the helper ever differ. |
 | trigger functions `answers_sync_counts`, `questions_before_delete` | ❌ | ❌ | run by the database only |
 
 Guard: refuses (and changes nothing) when 005 has not run (`MISSING_PREVIOUS`) or when 006 is already complete (`ALREADY_APPLIED`).
@@ -71,8 +71,9 @@ Tested locally (PostgreSQL 16 + Supabase stand-in, plain **and** Supabase-style 
 | 006 a second time | refuses `ALREADY_APPLIED`, schema **unchanged** |
 | 006 before 005 (after 004) | refuses `MISSING_PREVIOUS`, schema **unchanged** |
 | 006 on an empty project | refuses `MISSING_PREVIOUS` |
-| 001–005 + raw `patch_004.sql`, then 006 | 17/20 → **20/20** |
-| Health check detects: helper opened to visitors or users, `reel_viewed` opened to visitors or closed to users, housekeeping closed, `reel_views` / `consultation_list` readable by visitors | each one fails the right check |
+| 001–005 + raw `patch_004.sql`, then 006 | 16/20 → **20/20** |
+| App test suites on a database built only from 001–006 | **42/42** database tests, **23/23** browser flows |
+| Health check detects: helper opened to visitors, users or PUBLIC, the bookings view and the helper using different hours (or the view calling the helper), `reel_viewed` opened to visitors or closed to users, housekeeping closed, `reel_views` / `consultation_list` readable by visitors | each one fails the right check |
 
 ## Adding a migration later
 

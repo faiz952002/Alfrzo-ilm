@@ -1,6 +1,3 @@
--- !!! WORK IN PROGRESS - DO NOT RUN ON SUPABASE YET !!!
--- Known issue: closing consultation_cancel_cutoff() to logged-in users breaks the "My bookings" view
--- (consultation_list calls it). Waiting for the owner's choice between Option A and Option B.
 -- =====================================================================
 -- Alfrzo Ilm migration 006_phase1_fixes.sql
 -- Phase 1 fixes (the SQL of supabase/patch_004.sql, unchanged below the guard) + exact permissions
@@ -306,7 +303,27 @@ revoke execute on function public.answers_sync_counts() from public, anon, authe
 revoke execute on function public.questions_before_delete() from public, anon, authenticated;
 -- new table: written only by reel_viewed(); visitors and users get no direct rights
 revoke all on public.reel_views from anon, authenticated;
--- replaced view: logged-in users only (rows are limited to the caller inside the view)
+-- Bookings view: the same view as above, with the 2-hour rule written in directly.
+-- A function called inside a view is checked against the person reading the view, so calling the closed
+-- consultation_cancel_cutoff() here would make "My bookings" fail. Keep this value equal to
+-- consultation_cancel_cutoff() (the health check fails if the two ever differ).
+create or replace view public.consultation_list as
+select k.id, k.kind, k.price_paise, k.duration_min, k.starts_at, k.topic, k.status, k.meeting_room, k.refund_due, k.created_at,
+       k.scholar_id, (k.user_id = auth.uid()) as i_am_client,
+       sp.display_name as scholar_name,
+       case when up.default_anonymous then null else up.display_name end as client_name,
+       c.id as conversation_id,
+       case when k.status = 'pending_payment' then true
+            when k.status <> 'confirmed' then false
+            when public.is_admin() then true
+            when k.user_id = auth.uid() then now() < k.starts_at - interval '2 hours'
+            else now() < k.starts_at + make_interval(mins => k.duration_min) end as can_cancel
+from public.consultations k
+join public.profiles sp on sp.id = k.scholar_id
+join public.profiles up on up.id = k.user_id
+left join public.conversations c on c.consultation_id = k.id
+where k.user_id = auth.uid() or k.scholar_id = auth.uid() or public.is_admin();
+-- logged-in users only (rows are limited to the caller inside the view)
 revoke all on public.consultation_list from anon, authenticated;
 grant select on public.consultation_list to authenticated;
 
