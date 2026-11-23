@@ -59,7 +59,8 @@ export function loadConfig(env = process.env) {
   return {
     port: int(env.PORT, 3000, 1, 65535),
     publicDir: path.resolve(here, '..', 'public'),
-    trustProxy: bool(env.TRUST_PROXY),
+    // number of reverse proxies in front of the server (TRUST_PROXY=1 on Render; "true" also means 1; empty/0 = none)
+    trustProxy: bool(env.TRUST_PROXY) && !/^\d+$/.test(str(env.TRUST_PROXY)) ? 1 : int(env.TRUST_PROXY, 0, 0, 10),
     siteUrl, contactEmail, meetingBase,
     supabaseUrl, anonKey, serviceKey, supabaseReady,
     razorpay, paymentsReady, webhookReady,

@@ -9,8 +9,9 @@ Islamic sawal-jawab platform: log sawal puchte hain, **verified aalim/mufti** ja
 ## Setup (ek baar)
 
 1. **Supabase project banao** — https://supabase.com (free plan se shuru ho sakta hai).
-2. **SQL Editor** me ye 4 files **isi order me** poori paste karke Run karo:
-   `supabase/schema.sql` → `patch_001.sql` → `patch_002.sql` → `patch_003.sql`
+2. **SQL Editor** me ye 5 files **isi order me** poori paste karke Run karo:
+   `supabase/schema.sql` → `patch_001.sql` → `patch_002.sql` → `patch_003.sql` → `patch_004.sql`
+   (Pehle se chal raha project? Sirf `patch_004.sql` chalao — dobara chalana bhi safe hai.)
 3. **Authentication > URL Configuration:** Site URL = aapki site; Redirect URLs me `https://your-domain.com/reset` jodo.
 4. **Deploy** (Render example): repo GitHub par daalo → Render > New > Blueprint (`render.yaml`) → env vars bharo (`.env.example` dekho).
    Local chalane ke liye: `SUPABASE_URL=... SUPABASE_ANON_KEY=... npm start` → http://localhost:3000
@@ -31,7 +32,8 @@ Islamic sawal-jawab platform: log sawal puchte hain, **verified aalim/mufti** ja
 | Admin | Sawal approve/reject, aalim verify, reports (sawal, jawab, reel, chat), users, categories, consultations aur refunds, payments, audit log | `/admin` |
 
 - Har naya sawal pehle **"In review"** me jaata hai; admin approve kare tabhi aage badhta hai.
-- **Private sawal** kabhi public nahi hota: sirf puchne wala, jawab dene wale aalim aur admin dekh sakte hain.
+- **Private sawal** kabhi public nahi hota: sirf puchne wala, verified aalim (taaki koi jawab de sake) aur admin dekh sakte hain. Aalim ko puchne wale ka naam/email kabhi nahi dikhta.
+- **Chat** ki shikayat (report) ki jaanch ke liye admin baatcheet padh sakta hai (privacy page par likha hai).
 - **Chat** sirf confirmed consultation ke andar khulti hai. Phone number, email aur link database khud rokta hai.
 
 ## Consultation

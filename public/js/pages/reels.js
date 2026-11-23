@@ -20,7 +20,8 @@ export default async function reels(view, ctx) {
     const v = e.target;
     if (e.isIntersecting && e.intersectionRatio >= 0.6) {
       v.muted = muted; v.play().catch(() => {});
-      if (!counted.has(v.dataset.id)) { counted.add(v.dataset.id); S.sb.rpc('reel_viewed', { p_id: v.dataset.id }); }
+      // views are counted once per logged-in person (patch_004); visitors simply watch
+      if (S.user && !counted.has(v.dataset.id)) { counted.add(v.dataset.id); S.sb.rpc('reel_viewed', { p_id: v.dataset.id }).catch(() => {}); }
     } else v.pause();
   }), { threshold: [0, 0.6] });
   ctx.cleanup(() => { io.disconnect(); videos.forEach(v => v.pause()); });

@@ -4,7 +4,7 @@ import '../i18n.pages.js';
 import { h, icon, toast, clear, timeAgo, busy, confirmBox, CONTACT_RE } from '../ui.js';
 import { pageTitle, skeletons, empty, errorBox, catTag } from '../components.js';
 import { specialtyPicker } from './becomescholar.js';
-import { consultCard } from './consultations.js';
+import { consultCard, housekeeping } from './consultations.js';
 import { whenText } from './consult.js';
 
 // Scholar dashboard: question queue, my answers, my public profile.
@@ -147,6 +147,7 @@ export default async function dashboard(view, ctx) {
     const when = h('input', { type: 'datetime-local', id: 'sl', 'aria-label': t('dash.addslot'), style: 'min-width:0;flex:1' }), slotList = h('div'), lerr = h('div.err', { role: 'alert' });
     const addBtn = h('button.btn.sm', { type: 'button' }, icon('plus'), t('dash.addslot'));
     async function loadSlots() {
+      await housekeeping();
       const r = await S.sb.from('scholar_slots').select('*').eq('scholar_id', S.user.id).gt('starts_at', new Date().toISOString()).order('starts_at').limit(100);
       if (!ctx.alive() || tab !== 'consults') return; clear(slotList);
       if (!(r.data || []).length) return slotList.append(h('p.small.muted', t('dash.noslots')));
@@ -168,6 +169,7 @@ export default async function dashboard(view, ctx) {
 
     async function loadBookings() {
       clear(bookings); bookings.append(...skeletons(1));
+      await housekeeping();
       const r = await S.sb.from('consultation_list').select('*').eq('i_am_client', false).eq('scholar_id', S.user.id).order('starts_at', { ascending: false }).limit(50);
       if (!ctx.alive() || tab !== 'consults') return; clear(bookings);
       if (r.error) return bookings.append(errorBox(loadBookings));

@@ -7,7 +7,7 @@ addStrings({
   'home.today': 'आज का सवाल', 'home.foryou': 'आपके लिए', 'tab.all': 'सभी', 'tab.recent': 'नए', 'post.more': 'पूरा पढ़ें', 'home.reels': 'रील्स देखें', 'home.noans': 'अभी कोई जवाब नहीं आया है। पहला सवाल आप पूछिए!',
   'ex.popular': 'लोकप्रिय सवाल', 'ex.cats': 'श्रेणियाँ', 'ex.scholars': 'हमारे आलिम',
   'ask.mode.general': 'आम', 'ask.mode.private': 'निजी', 'ask.mode.priority': 'प्राथमिकता',
-  'ask.private.d': 'निजी सवाल सिर्फ़ आप, जवाब देने वाले आलिम और एडमिन देख सकते हैं। यह सबके सामने नहीं आता।',
+  'ask.private.d': 'निजी सवाल सिर्फ़ आप, सत्यापित आलिम (ताकि कोई जवाब दे सके) और एडमिन देख सकते हैं। आलिमों को आपका नाम या ईमेल नहीं दिखता। यह सबके सामने नहीं आता।',
   'ask.priority.on': 'आपका Premium चालू है: आपके सवाल आलिमों की कतार में ऊपर रहते हैं।', 'ask.priority.off': 'प्राथमिकता Premium के साथ मिलती है।', 'qd.private': 'निजी',
 
   'consult.title': 'मशविरा बुक करें', 'consult.type': 'मशविरे का तरीक़ा चुनें', 'consult.audio': 'ऑडियो कॉल', 'consult.video': 'वीडियो कॉल', 'consult.chat': 'चैट',
@@ -44,7 +44,7 @@ addStrings({
   'home.today': 'Aaj ka Sawal', 'home.foryou': 'For you', 'tab.all': 'All', 'tab.recent': 'Recent', 'post.more': 'Read more', 'home.reels': 'Watch reels', 'home.noans': 'No answers yet. Be the first to ask!',
   'ex.popular': 'Popular questions', 'ex.cats': 'Categories', 'ex.scholars': 'Our scholars',
   'ask.mode.general': 'General', 'ask.mode.private': 'Private', 'ask.mode.priority': 'Priority',
-  'ask.private.d': 'Only you, the answering scholars and admins can see a private question. It never appears publicly.',
+  'ask.private.d': 'Only you, verified scholars (so that one of them can answer) and admins can see a private question. Scholars never see your name or email. It never appears publicly.',
   'ask.priority.on': 'Your Premium is active: your questions stay higher in the scholars\' queue.', 'ask.priority.off': 'Priority comes with Premium.', 'qd.private': 'Private',
 
   'consult.title': 'Book consultation', 'consult.type': 'Select consultation type', 'consult.audio': 'Audio call', 'consult.video': 'Video call', 'consult.chat': 'Chat',

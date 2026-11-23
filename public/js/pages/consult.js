@@ -20,6 +20,7 @@ export default async function consult(view, ctx) {
   ctx.setTitle(t('consult.title'));
   view.append(pageTitle(t('consult.title')), ...skeletons(2));
   if (!/^[0-9a-f-]{36}$/i.test(sid)) return S.go('/scholars', true);
+  await S.sb.rpc('consultation_housekeeping').catch(() => null);   // frees expired unpaid holds so their times show again
   const [s, sv, sl] = await Promise.all([
     S.sb.from('scholar_directory').select('*').eq('id', sid).maybeSingle(),
     S.sb.from('scholar_services').select('*').eq('scholar_id', sid).eq('active', true),

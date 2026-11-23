@@ -48,3 +48,5 @@ jobs:
         run: bash tests/reset-db.sh && node --test tests/db.test.mjs
       - name: Consultations / messages / reels tests
         run: bash tests/reset-db.sh && node --test tests/db3.test.mjs
+      - name: Phase 1 fixes (refunds, cancellations, slots, reel views, counters)
+        run: bash tests/reset-db.sh && node --test tests/db4.test.mjs

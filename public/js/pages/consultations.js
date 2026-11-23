@@ -7,6 +7,10 @@ import { priceText, whenText, payForConsultation } from './consult.js';
 const KIND_ICON = { audio: 'phone', video: 'video', chat: 'chat' };
 const ST_CLS = { pending_payment: '.warn', confirmed: '', completed: '.blue', cancelled: '.red' };
 
+// Release expired unpaid holds and complete finished sessions before showing times or bookings (patch_004).
+// Best effort: if the database does not have it yet, or the network fails, the page still loads.
+export const housekeeping = () => S.sb.rpc('consultation_housekeeping').catch(() => null);
+
 // One booking, from the client's or the scholar's side. `reload` re-renders the list after an action.
 export function consultCard(k, reload) {
   const mine = k.i_am_client;
@@ -28,7 +32,9 @@ export function consultCard(k, reload) {
       actions.append(h('a.btn.sm', { href: (S.cfg.MEETING_BASE || 'https://meet.jit.si/') + 'alfrzo-ilm-' + k.meeting_room, target: '_blank', rel: 'noopener noreferrer' }, icon(KIND_ICON[k.kind]), t('consult.join')));
     if (!mine && now >= start) actions.append(h('button.btn.ghost.sm', { type: 'button', onclick: e => call(e.target, 'complete_consultation', { p_id: k.id }, t('dash.completed')) }, t('dash.complete')));
   }
-  if (k.status === 'pending_payment' || k.status === 'confirmed') actions.append(h('button.btn.ghost.sm', { type: 'button', onclick: async e => {
+  // The database decides (consultation_list.can_cancel, patch_004); older databases without it keep the old rule.
+  const canCancel = k.can_cancel ?? (k.status === 'pending_payment' || k.status === 'confirmed');
+  if (canCancel) actions.append(h('button.btn.ghost.sm', { type: 'button', onclick: async e => {
     if (!(await confirmBox(t('consult.cancel'), t('consult.cancel.d'), t('consult.cancel'), t('cancel'), true))) return;
     call(e.target, 'cancel_consultation', { p_id: k.id }, t('consult.cancelled'));
   } }, t('consult.cancel')));
@@ -40,6 +46,7 @@ export function consultCard(k, reload) {
     k.status === 'pending_payment' && mine ? h('div.small.muted', { style: 'margin-top:6px' }, t(S.cfg.PAYMENTS?.enabled ? 'consult.holdnote' : 'consult.payoff')) : null,
     k.status === 'confirmed' && k.kind !== 'chat' && now < start - 10 * 60000 ? h('div.small.muted', { style: 'margin-top:6px' }, t('consult.joinhint')) : null,
     k.status === 'confirmed' && k.kind !== 'chat' && !mine ? h('div.small.muted', { style: 'margin-top:6px' }, t('consult.hosthint')) : null,
+    k.status === 'confirmed' && mine && canCancel ? h('div.small.muted', { style: 'margin-top:6px' }, t('consult.cutoffnote')) : null,
     actions.children.length ? actions : null);
 }
 
@@ -49,6 +56,7 @@ export default async function consultations(view, ctx) {
   const list = h('div'); view.append(pageTitle(t('consult.mine'), true, h('a.btn.sm', { href: '/scholars' }, icon('plus'), t('consult.title'))), list);
   async function load() {
     clear(list); list.append(...skeletons(2));
+    await housekeeping();
     const r = await S.sb.from('consultation_list').select('*').eq('i_am_client', true).order('starts_at', { ascending: false }).limit(50);
     if (!ctx.alive()) return; clear(list);
     if (r.error) return list.append(errorBox(load));
