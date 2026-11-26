@@ -178,7 +178,7 @@ miss(nr, area, item, list) as (values
              from (select pg_get_viewdef(to_regclass('public.bookable_slots')) as viewdef) v,
                   (select def from f where proname = 'consultation_housekeeping') fn), false)),
         ('007 Premium payments record days + subscription', coalesce((select def like '%premium_days = p_days%' and def like '%subscription_id = sub.id%' and def like '%purpose = ''premium''%' from f where proname = 'activate_premium'), false)),
-        ('007 refunds are applied once per refund id, by share of days', coalesce((select def like '%payment_refunds%' and def like '%days_removed%' from f where proname = 'apply_payment_refund'), false)),
+        ('007 refunds are applied once per refund id, by exact share of time', coalesce((select def like '%payment_refunds%' and def like '%time_removed%' and def like '%target - done%' from f where proname = 'apply_payment_refund'), false)),
         ('007 old refund entry point delegates', coalesce((select def like '%apply_payment_refund%' from f where proname = 'mark_payment_refunded'), false))
       ) v(x, good) where not good)),
  (17, 'storage', 'bucket question-images: PRIVATE, 2 MB, jpeg/png/webp', array(select 'question-images' where not exists (

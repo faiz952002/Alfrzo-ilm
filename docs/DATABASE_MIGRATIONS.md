@@ -74,7 +74,7 @@ The live app (older code) keeps working after 006: it never calls housekeeping a
 | Admin-granted days are never removed | only the payment's own days are subtracted; extending an admin grant keeps provider `admin_grant` |
 | A consultation refund never touches Premium | consultation refunds keep the 006 rule (booking cancelled / "refund due" cleared, on a full refund) |
 | A repeated webhook is applied once | every refund is stored in `payment_refunds` under the provider's unique refund id |
-| Partial refunds | the same share of the days is removed (rounded up to whole days, in total over all refunds of that payment); the refunded amount can never exceed the payment; the payment becomes `refunded` when fully refunded |
+| Partial refunds | exactly the same share of the bought time is removed, to the microsecond (no rounding). It is computed on the running total of that payment's refunds and only the difference is taken each time, so many small refunds can never remove more than the payment bought; the refunded amount can never exceed the payment; the payment becomes `refunded` when fully refunded |
 | Expired / cancelled subscriptions | are never re-activated by a refund; an active one whose new end date is in the past becomes `cancelled` |
 | Server only | `apply_payment_refund(payment, refund_id, amount)` and `mark_payment_refunded` (old entry point = full refund of what is left) run only with the server's service key; `payment_refunds` is closed to visitors and users |
 

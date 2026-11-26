@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 const U = { admin: 'aaaaaaaa-0000-4000-8000-0000000000a1', sch: 'bbbbbbbb-0000-4000-8000-0000000000b1',
   p1: 'cccccccc-0000-4000-8000-0000000000c1', p2: 'cccccccc-0000-4000-8000-0000000000c2', p3: 'cccccccc-0000-4000-8000-0000000000c3',
   p4: 'cccccccc-0000-4000-8000-0000000000c4', p5: 'cccccccc-0000-4000-8000-0000000000c5', p6: 'cccccccc-0000-4000-8000-0000000000c6',
-  p7: 'cccccccc-0000-4000-8000-0000000000c7', eve: 'cccccccc-0000-4000-8000-0000000000e1' };
+  p7: 'cccccccc-0000-4000-8000-0000000000c7', p8: 'cccccccc-0000-4000-8000-0000000000c8', eve: 'cccccccc-0000-4000-8000-0000000000e1' };
 function run(script) {
   const r = spawnSync('psql', ['-X', '-q', '-At', '-F', '\t', '-v', 'ON_ERROR_STOP=1', '-d', process.env.PGDATABASE || 'askdeen'], { input: script, encoding: 'utf8' });
   if (r.status !== 0) throw new Error(r.stderr.trim());
@@ -29,6 +29,9 @@ const refund = (who, n, id, amount) => as('service', `select apply_payment_refun
 const sub = who => root(`select status||'|'||round(extract(epoch from current_period_end - now())/${DAY})||'|'||coalesce(provider,'-') from subscriptions where user_id='${U[who]}' order by created_at desc limit 1`);
 const pay = (who, n) => root(`select status||'|'||refunded_paise||'|'||coalesce(premium_days::text,'-') from payments where provider_payment_id='pay_${who}${n}XYZ'`);
 const premium = who => root(`select public.is_premium('${U[who]}')`);
+const endSecs = who => Number(root(`select extract(epoch from current_period_end) from subscriptions where user_id='${U[who]}' order by created_at desc limit 1`));
+const removedSecs = (who, n) => Number(root(`select coalesce(extract(epoch from sum(r.time_removed)),0) from payment_refunds r join payments p on p.id=r.payment_id where p.provider_payment_id='pay_${who}${n}XYZ'`));
+const near = (a, b, msg) => assert.ok(Math.abs(a - b) < 0.001, `${msg}: ${a} vs ${b}`);
 
 before(() => {
   root(`truncate auth.users cascade; truncate audit_logs, payments restart identity cascade; delete from storage.objects`);
@@ -50,7 +53,7 @@ test('a full refund of the only payment removes its 30 days: Premium ends, nothi
   assert.equal(pay('p1', 1), 'refunded|9900|30');
   assert.match(sub('p1'), /^cancelled\|0\|razorpay$/);
   assert.equal(premium('p1'), 'f');
-  assert.equal(root(`select days_removed||'|'||amount_paise from payment_refunds where provider_refund_id='rfnd_P1FULL000001'`), '30|9900');
+  assert.equal(root(`select extract(epoch from time_removed)::bigint||'|'||amount_paise from payment_refunds where provider_refund_id='rfnd_P1FULL000001'`), `${30 * DAY}|9900`);
 });
 
 test('two Premium payments (60 days): refunding the first removes only its 30 days, the second payment keeps Premium active', () => {
@@ -71,18 +74,38 @@ test('the same refund delivered twice (webhook retry) is applied once', () => {
   assert.equal(sub('p2'), 'active|30|razorpay');
 });
 
-test('partial refunds remove the same share of the days; together they can never exceed the payment', () => {
-  buy('p3', 1);                                                                    // 30 days for 9900
-  assert.equal(refund('p3', 1, 'rfnd_P3HALF000001', 4950), 'applied');            // half -> 15 days
+test('partial refunds remove exactly the same share of the time (no rounding); together they can never exceed the payment', () => {
+  buy('p3', 1);                                                                    // 30 days for 9900 paise
+  const start = endSecs('p3');
+  assert.equal(refund('p3', 1, 'rfnd_P3HALF000001', 4950), 'applied');            // half the money -> exactly 15 days
+  near(start - endSecs('p3'), 15 * DAY, 'half refund');
   assert.equal(sub('p3'), 'active|15|razorpay');
   assert.equal(pay('p3', 1), 'paid|4950|30');
-  assert.equal(refund('p3', 1, 'rfnd_P3SMALL00001', 100), 'applied');             // 1% more -> rounds up to 1 more day
-  assert.equal(sub('p3'), 'active|14|razorpay');
+  assert.equal(refund('p3', 1, 'rfnd_P3SMALL00001', 100), 'applied');             // 100 of 9900 -> 30 days x 100/9900 = 7h 16m 21.8s
+  near(start - endSecs('p3'), 15 * DAY + 30 * DAY * 100 / 9900, 'small refund is exact, not a whole day');
   assert.equal(refund('p3', 1, 'rfnd_P3TOOMUCH001', 9900), 'applied');            // asks for more than is left: only the rest
   assert.equal(pay('p3', 1), 'refunded|9900|30');
+  near(start - endSecs('p3'), 30 * DAY, 'in total exactly the 30 bought days');
+  near(removedSecs('p3', 1), 30 * DAY, 'recorded total');
   assert.match(sub('p3'), /^cancelled\|0\|/);
-  assert.equal(root(`select sum(r.amount_paise)||'|'||sum(r.days_removed) from payment_refunds r join payments p on p.id=r.payment_id where p.provider_payment_id='pay_p31XYZ'`), '9900|30');
+  assert.equal(root(`select sum(r.amount_paise) from payment_refunds r join payments p on p.id=r.payment_id where p.provider_payment_id='pay_p31XYZ'`), '9900');
   assert.equal(refund('p3', 1, 'rfnd_P3AGAIN00001', 100), 'nothing_left');
+  near(start - endSecs('p3'), 30 * DAY, 'nothing more removed');
+});
+
+test('many small partial refunds add up exactly and can never remove more than the payment bought', () => {
+  buy('p8', 1, { amount: 10000, days: 30 });                                       // a second Premium buyer
+  const start = endSecs('p8');
+  const parts = [1, 333, 1234, 777, 2500, 13, 999, 3000, 1143];                    // 9 refunds, together exactly 10000
+  parts.forEach((amt, i) => assert.equal(refund('p8', 1, `rfnd_P8PART${String(i).padStart(6, '0')}`, amt), 'applied'));
+  let paid = 0;
+  for (const amt of parts) paid += amt;
+  assert.equal(paid, 10000);
+  near(removedSecs('p8', 1), 30 * DAY, 'sum of all parts = the 30 bought days, no more');
+  near(start - endSecs('p8'), 30 * DAY, 'subscription shortened by exactly 30 days');
+  assert.equal(refund('p8', 1, 'rfnd_P8EXTRA000001', 5000), 'nothing_left');
+  near(removedSecs('p8', 1), 30 * DAY, 'still not more');
+  assert.equal(pay('p8', 1), 'refunded|10000|30');
 });
 
 test('admin-granted Premium is never cancelled by a payment refund: only the paid days go', () => {
@@ -150,6 +173,6 @@ test('refund functions and records are server-only: visitors and users are refus
 });
 
 test('every applied refund is written to the audit log with what it removed', () => {
-  const row = root(`select (meta->>'refund')||'|'||(meta->>'days_removed')||'|'||(meta->>'full') from audit_logs where action='payment_refunded' and meta->>'refund'='rfnd_P3HALF000001'`);
-  assert.equal(row, 'rfnd_P3HALF000001|15|false');
+  const row = root(`select (meta->>'refund')||'|'||(meta->>'seconds_removed')::numeric::bigint||'|'||(meta->>'full') from audit_logs where action='payment_refunded' and meta->>'refund'='rfnd_P3HALF000001'`);
+  assert.equal(row, `rfnd_P3HALF000001|${15 * DAY}|false`);
 });

@@ -5,7 +5,8 @@
 --     (payments.premium_days, payments.subscription_id) - a reliable payment-to-subscription record
 --   * every refund is recorded once, by the provider's refund id (new table payment_refunds), so a
 --     repeated webhook never applies a refund twice; refunds of one payment can never exceed its amount
---   * partial refunds remove the same share of the bought days (rounded up to whole days), in total
+--   * partial refunds remove exactly the same share of the bought time (to the microsecond, no rounding),
+--     computed on the running total of refunds, so many small refunds never remove more than the payment bought
 --   * a refund never cancels a whole subscription: other paid days and admin-granted days stay;
 --     only when the remaining end date is already in the past does the subscription end
 --   * an expired / cancelled subscription is never re-activated by a refund
@@ -47,7 +48,7 @@ create table if not exists public.payment_refunds (
   payment_id uuid not null references public.payments(id) on delete cascade,
   provider_refund_id text not null unique check (char_length(provider_refund_id) between 1 and 100),
   amount_paise int not null check (amount_paise > 0),
-  days_removed int not null default 0 check (days_removed >= 0),
+  time_removed interval not null default '0' check (time_removed >= interval '0'),
   created_at timestamptz not null default now()
 );
 create index if not exists payment_refunds_payment_idx on public.payment_refunds (payment_id);
@@ -112,7 +113,7 @@ end $$;
 create or replace function public.apply_payment_refund(p_payment text, p_refund text, p_amount int) returns text
 language plpgsql security definer set search_path = public as $$
 declare pay public.payments; sub public.subscriptions; k public.consultations;
-        amt int; total_days int; target int; done_days int; delta int := 0; is_full boolean;
+        amt int; total_days int; bought interval; target interval; done interval; delta interval := interval '0'; is_full boolean;
 begin
   if p_refund is null or char_length(p_refund) not between 1 and 100 then raise exception 'BAD_REFUND_ID' using errcode = 'P0001'; end if;
   if p_amount is null or p_amount <= 0 then raise exception 'BAD_AMOUNT' using errcode = 'P0001'; end if;
@@ -144,28 +145,33 @@ begin
       end if;
     end if;
   else
-    -- Premium: remove only this payment's share of its days (in total, over all its refunds)
+    -- Premium: remove exactly this payment's share of the time it bought. The share is computed on the RUNNING
+    -- TOTAL of its refunds (no rounding per refund), and only the difference to what earlier refunds already
+    -- removed is taken now - so the total removed can never exceed the time this payment bought.
     total_days := coalesce(pay.premium_days, 30);                           -- 30 = the default Premium period (PREMIUM_DAYS)
-    target := ceil(total_days::numeric * (pay.refunded_paise + amt) / pay.amount_paise)::int;
-    select coalesce(sum(days_removed), 0) into done_days from public.payment_refunds where payment_id = pay.id;
-    delta := greatest(0, least(target, total_days) - done_days);
-    if delta > 0 and pay.subscription_id is not null then
+    bought := make_interval(days => total_days);
+    target := make_interval(secs => total_days * 86400.0 * (pay.refunded_paise + amt) / pay.amount_paise);
+    if target > bought then target := bought; end if;
+    select coalesce(sum(time_removed), interval '0') into done from public.payment_refunds where payment_id = pay.id;
+    delta := target - done;
+    if delta < interval '0' then delta := interval '0'; end if;
+    if delta > interval '0' and pay.subscription_id is not null then
       select * into sub from public.subscriptions where id = pay.subscription_id for update;
       if found and sub.current_period_end is not null then
         update public.subscriptions
-           set current_period_end = current_period_end - make_interval(days => delta),
-               status = case when status = 'active' and current_period_end - make_interval(days => delta) <= now() then 'cancelled' else status end
+           set current_period_end = current_period_end - delta,
+               status = case when status = 'active' and current_period_end - delta <= now() then 'cancelled' else status end
          where id = sub.id;
       end if;
     end if;
   end if;
 
-  insert into public.payment_refunds (payment_id, provider_refund_id, amount_paise, days_removed)
+  insert into public.payment_refunds (payment_id, provider_refund_id, amount_paise, time_removed)
     values (pay.id, p_refund, amt, delta);
   insert into public.audit_logs (actor_id, action, target, meta)
     values (null, 'payment_refunded', coalesce(pay.user_id::text, ''),
             jsonb_build_object('payment', p_payment, 'refund', p_refund, 'amount_paise', amt, 'full', is_full,
-                               'purpose', pay.purpose, 'ref', pay.ref_id, 'subscription', pay.subscription_id, 'days_removed', delta));
+                               'purpose', pay.purpose, 'ref', pay.ref_id, 'subscription', pay.subscription_id, 'seconds_removed', round(extract(epoch from delta)::numeric, 6)));
   return 'applied';
 end $$;
 

@@ -71,8 +71,8 @@ function fakeSupabase() {
         const amt = Math.min(a.p_amount, p.amount - (p.refunded || 0)); if (amt <= 0) return send(200, 'nothing_left');
         p.refunded = (p.refunded || 0) + amt; if (p.refunded >= p.amount) p.status = 'refunded';
         if (p.purpose === 'premium') {
-          const target = Math.min(p.days, Math.ceil(p.days * p.refunded / p.amount)), delta = target - (p.daysRemoved || 0); p.daysRemoved = target;
-          const sub = db.subs.get(p.user_id); if (sub && delta > 0) { sub.until -= delta * 86400000; if (sub.status === 'active' && sub.until <= Date.now()) sub.status = 'cancelled'; }
+          const target = Math.min(p.days * 86400000, p.days * 86400000 * p.refunded / p.amount), delta = target - (p.msRemoved || 0); p.msRemoved = target;   // exact share, running total
+          const sub = db.subs.get(p.user_id); if (sub && delta > 0) { sub.until -= delta; if (sub.status === 'active' && sub.until <= Date.now()) sub.status = 'cancelled'; }
         }
         db.refunds.add(a.p_refund); return send(200, 'applied');
       }
