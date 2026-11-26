@@ -25,6 +25,7 @@ For each file: **New query** → paste the whole file → **Run** → wait for `
 5. `005_security_hardening.sql`
 6. `006_phase1_fixes.sql`
 7. `007_premium_refund_correction.sql`
+8. `008_profile_settings.sql`
 
 What you may see:
 * A warning about "destructive operations" → the files contain `drop … if exists` for their **own** security rules. Confirm with **Run**.
@@ -37,13 +38,16 @@ Run **only** `006_phase1_fixes.sql`, then `007_premium_refund_correction.sql`, t
 Existing data is kept (tested: 11/20 → 16/20 after 006 → 20/20 after 007, no rows lost).
 Do **not** run `patch_004.sql` directly – 006 contains the same SQL plus the correct permissions.
 
+### Project already set up with 001–007 (like the live project after 007)?
+Run **only** `008_profile_settings.sql`, then the health check (Step 3): 16/21 before → **21/21** after. Nothing is removed or rewritten.
+
 ### Project already set up with the OLD files (schema.sql + patch_001…003)?
 Run the 6 files in order anyway. 001 and 002 answer `ALREADY_APPLIED` (nothing changed), 003 and 004 re-apply safely,
 005 adds the security hardening. Existing users, questions and answers are kept (tested: health check 16/20 → 20/20, no data lost).
 
 ## Step 3 – Health check (read-only)
 1. **New query** → paste `supabase/DATABASE_HEALTH_CHECK.sql` → **Run**.
-2. You get 20 rows plus a last row `RESULT`. **Every `ok` must be `true`**, and the last row says `20 of 20 checks passed`.
+2. You get 21 rows plus a last row `RESULT`. **Every `ok` must be `true`**, and the last row says `21 of 21 checks passed` (with 001–008; see docs/DATABASE_MIGRATIONS.md for earlier states).
 3. Any `false`? The `details` column says exactly what is wrong. Send a screenshot before changing anything.
 
 ## Step 4 – Authentication settings

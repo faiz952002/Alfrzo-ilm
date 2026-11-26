@@ -69,9 +69,28 @@ export function createClient(baseUrl, anonKey) {
       if (!res.ok) return { error: fail(res, data) };
       save(toSession(data)); emit('SIGNED_IN'); return { session };
     },
-    async signOut() {
-      if (session) await http('/auth/v1/logout', { method: 'POST' }).catch(() => {});
+    // scope 'global' ends the sessions on every device (Supabase "log out everywhere"); default: this device only
+    async signOut(scope) {
+      if (session) await http('/auth/v1/logout' + (scope === 'global' ? '?scope=global' : ''), { method: 'POST' }).catch(() => {});
       save(null); emit('SIGNED_OUT');
+    },
+    // Checks the CURRENT password of the signed-in account (before a password change or account deletion).
+    // On success the fresh tokens replace the current ones; nothing else changes.
+    async verifyPassword(password) {
+      const email = session?.user?.email;
+      if (!email || !password) return false;
+      const res = await fetch(`${url}/auth/v1/token?grant_type=password`, { method: 'POST', headers: { apikey: anonKey, 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || !d.access_token) return false;
+      save(toSession(d)); return true;
+    },
+    // Sends the email-confirmation link again (only useful while the email is not confirmed)
+    async resendConfirmation(redirectTo) {
+      const email = session?.user?.email;
+      if (!email) return { error: { message: 'no email' } };
+      const q = redirectTo ? `?redirect_to=${encodeURIComponent(redirectTo)}` : '';
+      const { res, data } = await http('/auth/v1/resend' + q, { method: 'POST', body: { type: 'signup', email } });
+      return res.ok ? {} : { error: fail(res, data) };
     },
     async resetPassword(email, redirectTo) {
       const q = redirectTo ? `?redirect_to=${encodeURIComponent(redirectTo)}` : '';

@@ -12,7 +12,8 @@ All database setup lives in `supabase/migrations/`. Run the files **in number or
 | 005 | `005_security_hardening.sql` | **New.** Exact permissions, function allow-list, profiles for users who signed up early | safe to re-run (always ends in the same state) |
 | 006 | `006_phase1_fixes.sql` | Phase 1 fixes (the SQL of `patch_004.sql`, unchanged) + exact permissions for what it adds | refuses: `ALREADY_APPLIED`; refuses `MISSING_PREVIOUS` if 005 is missing |
 | 007 | `007_premium_refund_correction.sql` | Premium refunds remove only the days the refunded payment bought; each refund applied once | refuses: `ALREADY_APPLIED`; refuses `MISSING_PREVIOUS` if 006 is missing |
-| – | `../DATABASE_HEALTH_CHECK.sql` | **Read-only.** 20 checks for a project with **001–007**; every row must be `true` | always safe |
+| 008 | `008_profile_settings.sql` | Profile photo (private `avatars` bucket), consultation-notification preference, display-name check on change. Additive only | refuses: `ALREADY_APPLIED`; refuses `MISSING_PREVIOUS` if 007 is missing |
+| – | `../DATABASE_HEALTH_CHECK.sql` | **Read-only.** 21 checks for a project with **001–008**; every row must be `true` | always safe |
 
 ## Relation to the old files
 
@@ -81,13 +82,36 @@ The live app (older code) keeps working after 006: it never calls housekeeping a
 The server (`server/payments.js`) passes Razorpay's refund id and amount from the signed `refund.processed` webhook;
 `refund.failed` changes nothing. On a database without 007 it falls back to the old rule.
 
-## Health check before 006 / 007
+## 008 – Profile and settings
+
+* `profiles.avatar_path` – optional profile photo. Files go to a new **private** bucket `avatars` (1 MB, jpeg/png/webp).
+  Only the owner can upload, read (signed link) and delete files in their own folder; the path must point into that folder.
+* `profiles.notify_consult` (default ON) – when switched off, consultation notifications (`type = 'consult'`) are not created
+  for that person. Important account notifications (`system`) and all other types are unchanged.
+* `profiles_before_update` – a display name is checked **only when it is changed**: trimmed, 1–60 characters, no invisible or
+  control characters, no phone numbers / emails / links. Existing names are never rewritten.
+* Nothing is removed; payments, refunds and the RLS rules of existing tables are not touched.
+* The app works on a database **without** 008: the photo option and the consultation switch are simply not shown.
+
+## Health check before 006 / 007 / 008
 
 | Database state | Health check | Failing rows |
 |---|---|---|
 | 001–005 (production before this release) | **11 of 20** | 1, 2, 3, 4, 5, 9, 12, 13, 16 |
 | 001–006 | **16 of 20** | 1, 3, 5, 16 (the 007 items) |
-| 001–007 | **20 of 20** | none |
+| 001–007 (production after 007) | **16 of 21** | 4, 8, 9, 16, 21 (the 008 items) |
+| 001–008 | **21 of 21** | none |
+
+## Tested (008)
+
+| Scenario (plain and Supabase-style default privileges) | Result |
+|---|---|
+| Fresh project 001…008 | health check **21/21** |
+| 001–007 **with data** (incl. an unusual existing name), then 008 | 16/21 → **21/21**, existing rows **unchanged**, the existing name kept exactly |
+| 008 a second time | refuses `ALREADY_APPLIED`, database **unchanged** |
+| 008 before 007 | refuses `MISSING_PREVIOUS`, database **unchanged** |
+| An error injected just before `commit` | everything rolled back, database **unchanged**; the real file afterwards → 21/21 |
+| `tests/db6.test.mjs` | 7/7 (columns, own-folder photo paths, private bucket, name checks, notification preference, no client access to trigger functions, account deletion) |
 
 ## Tested (006 + 007)
 

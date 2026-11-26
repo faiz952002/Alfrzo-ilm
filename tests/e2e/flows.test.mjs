@@ -364,18 +364,132 @@ test('reporting: user reports an answer and a reel, admin hides both, they disap
 });
 
 // ============================== account ==============================
-test('settings: profile, anonymity default, password change, language switch', async () => {
-  const { page } = user; await go(page, '/settings'); await page.waitForSelector('#dn');
-  await page.fill('#dn', 'Zaid Khan'); await page.click('form button:has-text("Save")'); await page.waitForSelector('.toast');
-  assert.equal(sql(`select display_name from profiles where id='${uid('zaid@example.com')}'`), 'Zaid Khan');
-  await page.uncheck('label.switch:has-text("anonymous") input'); await page.waitForTimeout(500);
-  assert.equal(sql(`select default_anonymous from profiles where id='${uid('zaid@example.com')}'`), 'f');
-  await page.fill('#npw', 'NewPassw0rd!'); await page.click('form button:has-text("Change password")'); await page.waitForSelector('.toast');
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP4z8CAFWEXHbQSACj/P8Fu7N9hAAAAAElFTkSuQmCC', 'base64');
+test('profile: header, statistics from the database, completion and recent activity', async () => {
+  const { page } = user, me = uid('zaid@example.com');
+  await go(page, '/profile'); await page.waitForSelector('.stat-grid a.stat');
+  const n = q => Number(sql(q));
+  const stats = await page.locator('.stat-grid a.stat b').allInnerTexts();
+  assert.deepEqual(stats.map(Number), [
+    n(`select count(*) from questions where user_id='${me}'`), n(`select count(*) from questions where user_id='${me}' and status='answered'`),
+    n(`select count(*) from questions where user_id='${me}' and status in ('open','pending_review')`), n(`select count(*) from consultations where user_id='${me}'`),
+    n(`select count(*) from saved_answers where user_id='${me}'`), n(`select count(*) from scholar_followers where user_id='${me}'`)]);
+  assert.match(await page.locator('.me-tags').innerText(), /Email not confirmed/);
+  assert.match(await page.locator('.complete').innerText(), /Add a profile photo/);
+  assert.equal(await page.locator('.activity a.li').count() > 0, n(`select count(*) from questions where user_id='${me}'`) > 0);
+  assert.equal(await page.locator('main a[href="/settings"]:not(.complete a)').count(), 1, 'one way to settings on the profile page (no duplicate items)');
+  const rows = await page.locator('main .card.list a.li').evaluateAll(els => els.map(e => e.getAttribute('href')));
+  assert.equal(new Set(rows).size, rows.length, 'no duplicate rows: ' + rows.join(' '));
+});
+
+test('settings: name validation, unicode names, persistence after reload, language', async () => {
+  const { page } = user, me = uid('zaid@example.com'), dn = () => sql(`select display_name from profiles where id='${me}'`);
+  await go(page, '/settings'); await page.waitForSelector('#dn');
+  const before = dn();
+  await page.fill('#dn', '   '); await page.click('#profile form button[type=submit]'); assert.match(await page.locator('#profile .err').innerText(), /valid name/);
+  await page.fill('#dn', 'call 98765 43210'); await page.click('#profile form button[type=submit]'); assert.match(await page.locator('#profile .err').innerText(), /phone numbers/);
+  assert.equal(dn(), before, 'nothing saved for invalid names');
+  // the database refuses invisible characters even if the page check is skipped
+  const bad = await api(page, `/rest/v1/profiles?id=eq.${me}`, { method: 'PATCH', body: JSON.stringify({ display_name: 'Ali​Khan' }) });
+  assert.ok(bad.status >= 400); assert.equal(dn(), before);
+  // unicode names are stored and shown exactly (no encoding damage)
+  const uni = 'ज़ैद π ʒ^07 !';
+  await page.fill('#dn', uni); await page.click('#profile form button[type=submit]'); await page.waitForSelector('.toast');
+  assert.equal(dn(), uni);
+  await go(page, '/profile'); await page.waitForSelector('.me-head h1'); assert.equal(await page.locator('.me-head h1').innerText(), uni);
+  await go(page, '/settings'); await page.waitForSelector('#dn'); assert.equal(await page.inputValue('#dn'), uni);
+  await page.fill('#dn', '  Zaid   Khan '); await page.click('#profile form button[type=submit]'); await page.waitForSelector('.toast');
+  assert.equal(dn(), 'Zaid Khan');
+  await page.reload(); await page.waitForSelector('#dn'); assert.equal(await page.inputValue('#dn'), 'Zaid Khan');
+  assert.ok(await page.locator('#profile form button[type=submit]').isDisabled(), 'save stays disabled until something changes');
+  await shot(page, '15-settings');
   await go(page, '/profile'); await page.waitForSelector('.me-head h1'); await shot(page, '13-my-profile');
   await page.click('button.li:has-text("Language")'); await page.waitForFunction(() => document.documentElement.lang === 'hi');
   await page.waitForSelector('.me-head h1'); assert.equal(await page.locator('.me-head h1').innerText(), 'Zaid Khan');
   assert.match(await page.locator('nav.bottomnav').innerText(), /होम/);
-  await page.click('button.li:has-text("Language")'); await page.waitForFunction(() => document.documentElement.lang === 'en');
+  assert.equal(sql(`select language from profiles where id='${me}'`), 'hi');
+  await page.click('button.li:has-text("भाषा")'); await page.waitForFunction(() => document.documentElement.lang === 'en');
+});
+
+test('settings: privacy and notification switches persist; consultation notifications follow the switch; other users cannot change them', async () => {
+  const { page } = user, me = uid('zaid@example.com'), col = c => sql(`select ${c} from profiles where id='${me}'`);
+  await go(page, '/settings'); await page.waitForSelector('#notifications label.switch');
+  await page.uncheck('label.switch:has-text("anonymous") input'); await page.waitForSelector('.toast');
+  await page.uncheck('label.switch:has-text("Consultation updates") input'); await page.waitForFunction(() => document.querySelectorAll('.toast').length >= 2);
+  assert.equal(col('default_anonymous'), 'f'); assert.equal(col('notify_consult'), 'f');
+  assert.ok(await page.locator('label.switch.locked input').isDisabled(), 'important account notifications cannot be switched off');
+  await page.reload(); await page.waitForSelector('#notifications label.switch');
+  assert.equal(await page.isChecked('label.switch:has-text("anonymous") input'), false);
+  assert.equal(await page.isChecked('label.switch:has-text("Consultation updates") input'), false);
+  assert.equal(await page.isChecked('label.switch:has-text("my question is answered") input'), true);
+  const c0 = Number(sql(`select count(*) from notifications where user_id='${me}'`));
+  sql(`insert into notifications(user_id,type,data) values ('${me}','consult','{}'),('${me}','system','{}')`);
+  assert.equal(Number(sql(`select count(*) from notifications where user_id='${me}'`)), c0 + 1, 'only the account notification was created');
+  await page.check('label.switch:has-text("Consultation updates") input'); await page.waitForFunction(() => document.querySelectorAll('.toast').length >= 1);
+  await page.waitForTimeout(400); assert.equal(col('notify_consult'), 't');
+  // someone else's profile: the update silently matches nothing (RLS), and photo paths must stay in the owner's folder
+  const other = scholar.page, before = sql(`select notify_consult::text || default_anonymous::text || coalesce(avatar_path,'') from profiles where id='${me}'`);
+  const r = await api(other, `/rest/v1/profiles?id=eq.${me}`, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ notify_consult: false, default_anonymous: true }) });
+  assert.deepEqual(await r.json(), []);
+  assert.equal(sql(`select notify_consult::text || default_anonymous::text || coalesce(avatar_path,'') from profiles where id='${me}'`), before);
+  const sp = await api(other, `/rest/v1/profiles?id=eq.${SCH}`, { method: 'PATCH', body: JSON.stringify({ avatar_path: `${me}/avatar-1732600000000.webp` }) });
+  assert.ok(sp.status >= 400, 'a photo path in another person\'s folder is refused');
+});
+
+test('settings: profile photo upload, private storage, change and remove', async () => {
+  const { page } = user, me = uid('zaid@example.com');
+  await go(page, '/settings'); await page.waitForSelector('#profile .photo-row input[type=file]', { state: 'attached' });
+  await page.setInputFiles('#profile .photo-row input[type=file]', { name: 'me.png', mimeType: 'image/png', buffer: PNG });
+  await page.waitForSelector('#profile .photo-row .avatar img');
+  const p1 = sql(`select avatar_path from profiles where id='${me}'`);
+  assert.match(p1, new RegExp(`^${me}/avatar-\\d+\\.(webp|jpg)$`));
+  assert.equal(sql(`select count(*) from storage.objects where bucket_id='avatars' and name='${p1}'`), '1');
+  // nobody else can read it, and nobody can upload into this person's folder
+  const sig = await api(scholar.page, `/storage/v1/object/sign/avatars/${p1}`, { method: 'POST', body: JSON.stringify({ expiresIn: 60 }) });
+  assert.ok(sig.status >= 400, 'another user cannot get a link to the photo');
+  const up = await api(scholar.page, `/storage/v1/object/avatars/${me}/avatar-1.webp`, { method: 'POST', headers: { 'Content-Type': 'image/webp' }, body: PNG });
+  assert.ok(up.status >= 400, 'another user cannot upload into this folder');
+  await page.setInputFiles('#profile .photo-row input[type=file]', { name: 'me2.png', mimeType: 'image/png', buffer: PNG });
+  await page.waitForFunction(old => document.querySelector('#profile .photo-row img') && !document.querySelector('#profile .photo-row[aria-busy=true]'), p1);
+  await page.waitForTimeout(500);
+  const p2 = sql(`select avatar_path from profiles where id='${me}'`);
+  assert.notEqual(p2, p1); assert.equal(sql(`select count(*) from storage.objects where bucket_id='avatars' and owner='${me}'`), '1', 'the old photo file is removed');
+  await go(page, '/profile'); await page.waitForSelector('.me-head .avatar img'); assert.doesNotMatch(await page.locator('.complete').innerText(), /Add a profile photo/);
+  await go(page, '/settings'); await page.click('#profile button:has-text("Remove")'); await page.waitForSelector('#profile button:has-text("Upload photo")');
+  assert.equal(sql(`select coalesce(avatar_path,'none') from profiles where id='${me}'`), 'none');
+  assert.equal(sql(`select count(*) from storage.objects where bucket_id='avatars' and owner='${me}'`), '0');
+  // keep one photo for the account-deletion test
+  await page.setInputFiles('#profile .photo-row input[type=file]', { name: 'me.png', mimeType: 'image/png', buffer: PNG }); await page.waitForSelector('#profile .photo-row .avatar img');
+});
+
+test('settings: password change needs the current password, a match and a letter + number', async () => {
+  const { page } = user;
+  await go(page, '/settings'); await page.waitForSelector('#cpw');
+  const submit = () => page.click('#security form button[type=submit]'), err = () => page.locator('#security .err').innerText();
+  await page.fill('#cpw', PW); await page.fill('#npw', 'abcdefgh'); await page.fill('#npw2', 'abcdefgh'); await submit(); assert.match(await err(), /one letter and one number/);
+  await page.fill('#npw', 'NewPassw0rd!'); await page.fill('#npw2', 'NewPassw0rd?'); await submit(); assert.match(await err(), /do not match/);
+  await page.fill('#cpw', 'wrong-pass1'); await page.fill('#npw2', 'NewPassw0rd!'); await submit(); await page.waitForFunction(() => /not correct/.test(document.querySelector('#security .err').textContent));
+  await page.fill('#cpw', PW); await submit(); assert.match(await toastText(page), /Password changed/);
+  assert.equal(await page.inputValue('#cpw'), ''); assert.equal(await page.inputValue('#npw'), '');
+  // the new password works, the old one does not
+  const v = await mk('en', 'pwcheck'); await go(v.page, '/login'); await v.page.fill('#em', 'zaid@example.com'); await v.page.fill('#pw', PW); await v.page.click('form button[type=submit]');
+  await v.page.waitForSelector('.err:not(:empty)');
+  await v.page.fill('#pw', 'NewPassw0rd!'); await v.page.click('form button[type=submit]'); await atHome(v.page); await v.ctx.close();
+});
+
+test('settings: email status + resend, download my data (no secrets), log out from all devices', async () => {
+  const { page } = user, me = uid('zaid@example.com');
+  await go(page, '/settings'); await page.waitForSelector('#security');
+  assert.match(await page.locator('#security').innerText(), /Email not confirmed/);
+  await page.click('#security button:has-text("Send confirmation email again")'); assert.match(await toastText(page), /Confirmation email sent/);
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#security button:has-text("Download my data")')]);
+  const data = JSON.parse(fs.readFileSync(await dl.path(), 'utf8'));
+  assert.equal(data.account.id, me); assert.equal(data.profile[0].display_name, 'Zaid Khan');
+  assert.equal(data.questions.length, Number(sql(`select count(*) from questions where user_id='${me}'`)));
+  assert.doesNotMatch(JSON.stringify(data), /access_token|refresh_token|password/i);
+  const v = await mk('en', 'logoutall'); await go(v.page, '/login'); await v.page.fill('#em', 'zaid@example.com'); await v.page.fill('#pw', 'NewPassw0rd!'); await v.page.click('form button[type=submit]'); await atHome(v.page);
+  await go(v.page, '/settings'); await v.page.click('button:has-text("Log out from all devices")'); await v.page.click('.sheet button.danger'); await atHome(v.page);
+  assert.equal(await v.page.evaluate(() => localStorage.getItem('askdeen.session.v1')), null); await v.ctx.close();
 });
 
 test('premium: with no gateway configured the page says so and offers no buy button', async () => {
@@ -395,7 +509,11 @@ test('phone layout: no page scrolls sideways', async () => {
 
 test('privacy page renders and the account can be deleted completely (bookings, threads and messages go with it)', async () => {
   const { page } = user; await go(page, '/privacy'); await page.waitForSelector('section.card'); assert.ok((await page.locator('section.card').count()) >= 9);
-  await go(page, '/settings'); await page.waitForSelector('button.danger'); await page.click('button.danger'); await page.click('.sheet button.danger'); await atHome(page);
+  await go(page, '/settings'); await page.waitForSelector('button.danger'); await page.click('button.danger');
+  await page.fill('#delpw', 'wrong-pass1'); await page.click('.sheet button.danger'); await page.waitForFunction(() => /not correct/.test(document.querySelector('.sheet .err').textContent));
+  assert.equal(sql(`select count(*) from auth.users where email='zaid@example.com'`), '1', 'a wrong password deletes nothing');
+  await page.fill('#delpw', 'NewPassw0rd!'); await page.click('.sheet button.danger'); await atHome(page);
+  assert.equal(sql(`select count(*) from storage.objects where bucket_id='avatars'`), '0', 'the profile photo file is deleted too');
   assert.equal(sql(`select count(*) from auth.users where email='zaid@example.com'`), '0');
   assert.equal(sql(`select (select count(*) from questions) + (select count(*) from consultations) + (select count(*) from conversations) + (select count(*) from messages)`), '0');
   const v = await mk('en', 'relogin'); await go(v.page, '/login'); await v.page.fill('#em', 'zaid@example.com'); await v.page.fill('#pw', 'NewPassw0rd!'); await v.page.click('form button[type=submit]');

@@ -52,3 +52,5 @@ jobs:
         run: bash tests/reset-db.sh && node --test tests/db4.test.mjs
       - name: Premium refund correction (migration 007)
         run: bash tests/reset-db.sh && node --test tests/db5.test.mjs
+      - name: Profile and settings (migration 008)
+        run: bash tests/reset-db.sh && node --test tests/db6.test.mjs

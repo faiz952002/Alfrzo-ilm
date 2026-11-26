@@ -34,6 +34,7 @@ export const catName = c => c ? (getLang() === 'en' ? c.name_en : c.name_hi) : '
 export function errMsg(e) {
   const m = `${e?.message || ''} ${e?.code || ''}`;
   if (/CONTACT_INFO/.test(m)) return t('err.contact');
+  if (/BAD_NAME/.test(m)) return t('err.name');
   if (/RATE_LIMIT/.test(m)) return t('err.rate');
   if (/SUSPENDED/.test(m)) return t('err.suspended');
   if (/23505|duplicate key/.test(m)) return t('err.dup');

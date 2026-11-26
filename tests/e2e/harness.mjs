@@ -58,6 +58,7 @@ function authShim(pgrstPort) {
       return send(200, { id, email });
     }
     if (p === '/auth/v1/logout') return send(204);
+    if (p === '/auth/v1/resend') return send(200, {});
     if (p.startsWith('/rest/v1/')) {   // proxy to the real PostgREST
       const headers = { ...req.headers, host: `127.0.0.1:${pgrstPort}` }; delete headers.apikey; delete headers.origin; delete headers.referer;
       const up = http.request({ host: '127.0.0.1', port: pgrstPort, path: p.replace('/rest/v1', '') + url.search, method: req.method, headers }, r => { res.writeHead(r.statusCode, { ...r.headers, 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': '*' }); r.pipe(res); });
