@@ -1,4 +1,4 @@
-// Real-PostgreSQL tests for supabase/patch_004.sql (Phase 1 stability fixes).
+// Real-PostgreSQL tests for the Phase 1 fixes (supabase/migrations/006_phase1_fixes.sql; legacy: patch_004.sql).
 // Run after tests/reset-db.sh:  PGHOST=... PGPORT=... PGUSER=postgres PGDATABASE=askdeen node --test tests/db4.test.mjs
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
@@ -59,7 +59,7 @@ test('H1: a payment that arrives after the hold expired is flagged "refund due";
   const k = consult('4 days', { status: 'pending_payment', price: 29900, user: 'ben' });
   as('service', `select record_consultation_order('${U.ben}','${k}','order_LATEPAY00001',29900,'INR','razorpay')`);
   root(`update consultations set created_at = now() - interval '20 minutes' where id='${k}'`);
-  as('anon', `select consultation_housekeeping()`);                                                   // hold expires
+  as('ben', `select consultation_housekeeping()`);                                                    // hold expires (any logged-in user)
   as('service', `select confirm_consultation_payment('${U.ben}','order_LATEPAY00001','pay_LATEPAY00001',29900,'INR')`);
   assert.equal(statusOf(k), 'cancelled/true');
   as('service', `select mark_payment_refunded('pay_LATEPAY00001')`);
@@ -92,19 +92,37 @@ test('H2: the scholar can cancel until the session ends (client refunded); the a
   as('admin', `select cancel_consultation('${any}')`);
   assert.equal(statusOf(any), 'cancelled/true');
 });
-test('H2/M2: housekeeping completes finished sessions and releases unpaid holds (anyone may trigger it)', () => {
+test('H2/M2: housekeeping (logged-in users only) completes finished sessions and releases unpaid holds; visitors see the freed time through bookable_slots', () => {
   const done = consult('-2 hours', { dur: 30 }), running = consult('-10 minutes', { dur: 30 });
   const slot = root(`insert into scholar_slots(scholar_id,starts_at) values('${U.sch}',now()+interval '5 days') returning id`);
   const hold = root(`insert into consultations(user_id,scholar_id,slot_id,kind,price_paise,duration_min,starts_at,status,created_at)
                      values('${U.amy}','${U.sch}','${slot}','audio',19900,30,now()+interval '5 days','pending_payment',now()-interval '20 minutes') returning id`);
   root(`update scholar_slots set status='held' where id='${slot}'`);
   assert.equal(as('anon', `select count(*) from scholar_slots where id='${slot}'`), '0');          // hidden while held
-  as('anon', `select consultation_housekeeping()`);
+  assert.equal(as('anon', `select count(*) from bookable_slots where id='${slot}'`), '1');         // ...but the expired hold is shown as free
+  fails(() => as('anon', `select consultation_housekeeping()`), /permission denied/);               // visitors cannot run it (006)
+  as('amy', `select consultation_housekeeping()`);
   assert.equal(statusOf(done), 'completed/false');
   assert.equal(statusOf(running), 'confirmed/false');
   assert.equal(statusOf(hold), 'cancelled/false');
   assert.equal(as('anon', `select status from scholar_slots where id='${slot}'`), 'open');          // bookable again
   fails(() => as('amy', `select cancel_consultation('${done}')`), /NOT_CANCELLABLE/);
+});
+
+test('M2: bookable_slots hides a hold that is still within its 15 minutes, and booking an expired hold releases it first', () => {
+  const svc = root(`insert into scholar_services(scholar_id,kind,price_paise,duration_min) values('${U.sch}','chat',0,30) on conflict do nothing returning id`);
+  const slot = root(`insert into scholar_slots(scholar_id,starts_at) values('${U.sch}',now()+interval '9 days') returning id`);
+  const hold = root(`insert into consultations(user_id,scholar_id,slot_id,kind,price_paise,duration_min,starts_at,status) values('${U.amy}','${U.sch}','${slot}','audio',19900,30,now()+interval '9 days','pending_payment') returning id`);
+  root(`update scholar_slots set status='held' where id='${slot}'`);
+  assert.equal(as('anon', `select count(*) from bookable_slots where id='${slot}'`), '0');          // fresh hold: not bookable
+  root(`update consultations set created_at = now() - interval '16 minutes' where id='${hold}'`);
+  assert.equal(as('anon', `select count(*) from bookable_slots where id='${slot}'`), '1');          // expired hold: bookable
+  const k = as('ben', `select book_consultation('${slot}','chat','')`);                            // booking releases the old hold first
+  assert.equal(statusOf(hold), 'cancelled/false');
+  assert.equal(root(`select status from consultations where id='${k}'`), 'confirmed');
+  assert.equal(as('anon', `select count(*) from bookable_slots where id='${slot}'`), '0');          // now really booked
+  root(`delete from scholar_services where scholar_id='${U.sch}' and kind='chat'`);   // leave the services as the next test expects
+  void svc;
 });
 
 // ------------------------------ M1: overlaps ------------------------------

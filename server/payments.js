@@ -7,7 +7,7 @@ import { hmacHex, safeEqualHex } from './security.js';
 //  * The database function activate_premium() is idempotent and cross-checks user / amount, so replays never double-grant.
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const ORDER_RE = /^order_[A-Za-z0-9]{6,40}$/, PAY_RE = /^pay_[A-Za-z0-9]{6,40}$/, SIG_RE = /^[a-f0-9]{64}$/;
+const ORDER_RE = /^order_[A-Za-z0-9]{6,40}$/, PAY_RE = /^pay_[A-Za-z0-9]{6,40}$/, RFND_RE = /^rfnd_[A-Za-z0-9]{6,40}$/, SIG_RE = /^[a-f0-9]{64}$/;
 
 const errText = r => (typeof r?.data === 'string' ? r.data : r?.data?.message || r?.data?.error?.description || `HTTP ${r?.status}`);
 
@@ -133,8 +133,19 @@ export function paymentsApi(cfg, { sb, rzp, limiter, log = console }) {
       } else if (type === 'payment.failed' && ORDER_RE.test(pe?.order_id || '')) {
         await sb.rpc('fail_payment', { p_order: pe.order_id, p_payment: pe.id });
       } else if (type === 'refund.processed' && PAY_RE.test(re?.payment_id || '')) {
-        const r = await sb.rpc('mark_payment_refunded', { p_payment: re.payment_id });
+        // One refund, by Razorpay's refund id and amount (migration 007): removes only what this payment bought,
+        // applies a repeated webhook only once, never more than the payment amount.
+        let r;
+        if (RFND_RE.test(re.id || '') && Number.isInteger(re.amount) && re.amount > 0) {
+          r = await sb.rpc('apply_payment_refund', { p_payment: re.payment_id, p_refund: re.id, p_amount: re.amount });
+          if (!r.ok && r.status === 404) r = null;                                        // database without 007: old rule below
+          else if (r.ok && r.data && r.data !== 'applied') log.warn('refund', re.id, 'not applied:', String(r.data));
+        }
+        if (!r) r = await sb.rpc('mark_payment_refunded', { p_payment: re.payment_id });
         if (!r.ok && r.status >= 500) return send(res, 500, { error: 'temporary failure' });
+        if (!r.ok) log.warn('refund rejected:', errText(r).slice(0, 80));
+      } else if (type === 'refund.failed') {
+        log.warn('refund failed at Razorpay:', String(re?.id || '').slice(0, 40), 'payment', String(re?.payment_id || '').slice(0, 40));   // nothing changes
       }
       send(res, 200, { ok: true });
     } catch (e) { log.error('webhook error:', e.message); send(res, 500, { error: 'temporary failure' }); }

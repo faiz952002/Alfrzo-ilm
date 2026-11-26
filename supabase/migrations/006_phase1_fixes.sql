@@ -5,7 +5,8 @@
 --   H1  a refund only undoes what that payment bought (a consultation refund never cancels Premium)
 --   H2  cancellation rules: client until 2 h before the start, scholar until the end, admin any time
 --   M1  no overlapping open times, no double booking of a scholar's time
---   M2  expired unpaid holds are released for everyone (consultation_housekeeping)
+--   M2  expired unpaid holds are released (consultation_housekeeping, logged-in users) and shown as free to
+--       visitors through the read-only view bookable_slots (no public function)
 --   M3  reel views: logged-in users only, one view per person per reel (new table reel_views)
 --   M6  a question that has a published answer cannot be deleted by the asker
 --   L1/L2  answer counters and question status stay correct when answers are hidden or removed
@@ -292,9 +293,10 @@ create trigger questions_before_delete before delete on public.questions
 -- ---------------------------------------------------------------------
 -- 2-hour cancellation helper: used only inside cancel_consultation() and the consultation_list view -> no direct access
 revoke execute on function public.consultation_cancel_cutoff() from public, anon, authenticated;
--- housekeeping: the booking page (visitors may look at a scholar's open times) and "My bookings" call it
+-- housekeeping: logged-in users only ("My bookings", the scholar dashboard, booking and cancelling run it).
+-- Visitors never call it; they read the bookable_slots view below, which already treats expired holds as free.
 revoke execute on function public.consultation_housekeeping() from public, anon, authenticated;
-grant execute on function public.consultation_housekeeping() to anon, authenticated;
+grant execute on function public.consultation_housekeeping() to authenticated;
 -- reel views: logged-in users only
 revoke execute on function public.reel_viewed(uuid) from public, anon, authenticated;
 grant execute on function public.reel_viewed(uuid) to authenticated;
@@ -326,5 +328,22 @@ where k.user_id = auth.uid() or k.scholar_id = auth.uid() or public.is_admin();
 -- logged-in users only (rows are limited to the caller inside the view)
 revoke all on public.consultation_list from anon, authenticated;
 grant select on public.consultation_list to authenticated;
+
+-- Public list of bookable times (read-only view, no function). Shows the same slots as the public slot rule
+-- (open, in the future, verified scholar) PLUS held slots whose unpaid hold is older than 15 minutes: those are
+-- free again, and book_consultation() releases them (housekeeping) before booking. Keep the 15 minutes equal to
+-- consultation_housekeeping() (the health check fails if the two ever differ).
+create or replace view public.bookable_slots as
+select s.id, s.scholar_id, s.starts_at
+  from public.scholar_slots s
+ where s.starts_at > now()
+   and public.scholar_is_verified(s.scholar_id)
+   and (s.status = 'open'
+        or (s.status = 'held'
+            and not exists (select 1 from public.consultations c
+                             where c.slot_id = s.id and c.status = 'pending_payment'
+                               and c.created_at >= now() - interval '15 minutes')));
+revoke all on public.bookable_slots from anon, authenticated;
+grant select on public.bookable_slots to anon, authenticated;
 
 commit;

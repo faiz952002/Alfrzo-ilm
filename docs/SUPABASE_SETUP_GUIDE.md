@@ -15,7 +15,7 @@ Time: about 20 minutes. You only copy, paste and click **Run**. Do every step in
    * Not all 0? **Stop.** The project already has something in it – ask before continuing.
    * Only `auth_users` is above 0? That is fine (people signed up early); step 2 file 005 gives them profiles.
 
-## Step 2 – Run the 6 setup files (each once, in this order)
+## Step 2 – Run the 7 setup files (each once, in this order)
 For each file: **New query** → paste the whole file → **Run** → wait for `Success. No rows returned`.
 
 1. `001_base_schema.sql`
@@ -24,6 +24,7 @@ For each file: **New query** → paste the whole file → **Run** → wait for `
 4. `004_private_questions_consultations_chat_reels.sql`
 5. `005_security_hardening.sql`
 6. `006_phase1_fixes.sql`
+7. `007_premium_refund_correction.sql`
 
 What you may see:
 * A warning about "destructive operations" → the files contain `drop … if exists` for their **own** security rules. Confirm with **Run**.
@@ -32,7 +33,8 @@ What you may see:
 * Any other `ERROR` → **stop**, do not continue, copy the full error text and ask.
 
 ### Project already set up with 001–005 (like the live project)?
-Run **only** `006_phase1_fixes.sql`, then the health check (Step 3). Existing data is kept (tested: 13/20 → 20/20, no rows lost).
+Run **only** `006_phase1_fixes.sql`, then `007_premium_refund_correction.sql`, then the health check (Step 3).
+Existing data is kept (tested: 11/20 → 16/20 after 006 → 20/20 after 007, no rows lost).
 Do **not** run `patch_004.sql` directly – 006 contains the same SQL plus the correct permissions.
 
 ### Project already set up with the OLD files (schema.sql + patch_001…003)?

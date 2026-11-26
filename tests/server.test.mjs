@@ -14,12 +14,14 @@ const jwt = role => `${b64({ alg: 'HS256' })}.${b64({ role })}.sig`;
 const ANON = jwt('anon'), SERVICE = jwt('service_role');
 const KEY_ID = 'rzp_test_KEYID', KEY_SECRET = 'rzp_secret_SECRETVALUE', WH_SECRET = 'whsec_WEBHOOKSECRET';
 const ALICE = '11111111-1111-4111-8111-111111111111', BOB = '22222222-2222-4222-8222-222222222222', CAROL = '55555555-5555-4555-8555-555555555555';
-const TOK = { alice: 'tok.alice.sig', bob: 'tok.bob.sig', carol: 'tok.carol.sig' }, WHO = { 'tok.alice.sig': ALICE, 'tok.bob.sig': BOB, 'tok.carol.sig': CAROL };
+const DORA = '66666666-6666-4666-8666-666666666601', ERIN = '66666666-6666-4666-8666-666666666602', FRANK = '66666666-6666-4666-8666-666666666603', GINA = '66666666-6666-4666-8666-666666666604', HANA = '66666666-6666-4666-8666-666666666605';
+const TOK = { alice: 'tok.alice.sig', bob: 'tok.bob.sig', carol: 'tok.carol.sig', dora: 'tok.dora.sig', erin: 'tok.erin.sig', frank: 'tok.frank.sig', gina: 'tok.gina.sig', hana: 'tok.hana.sig' },
+  WHO = { 'tok.alice.sig': ALICE, 'tok.bob.sig': BOB, 'tok.carol.sig': CAROL, 'tok.dora.sig': DORA, 'tok.erin.sig': ERIN, 'tok.frank.sig': FRANK, 'tok.gina.sig': GINA, 'tok.hana.sig': HANA };
 const QID = '33333333-3333-4333-8333-333333333333';
 const hmac = (secret, data) => crypto.createHmac('sha256', secret).update(data).digest('hex');
 
 // ---------------- fake Supabase ----------------
-const db = { payments: new Map(), subs: new Map(), consults: new Map(), rpcCalls: [], failRpc: false };
+const db = { payments: new Map(), subs: new Map(), consults: new Map(), refunds: new Set(), rpcCalls: [], failRpc: false, no007: false };
 function fakeSupabase() {
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x'); let body = '';
@@ -56,10 +58,24 @@ function fakeSupabase() {
         if (p.user_id !== a.p_user) return send(400, { message: 'USER_MISMATCH' });
         if (p.amount !== a.p_amount || p.currency !== a.p_currency) return send(400, { message: 'AMOUNT_MISMATCH' });
         if (p.status === 'refunded') return send(400, { message: 'ALREADY_REFUNDED' });
-        if (p.status !== 'paid') { p.status = 'paid'; p.payment_id = a.p_payment; const prev = db.subs.get(a.p_user); db.subs.set(a.p_user, { status: 'active', until: (prev?.until ?? Date.now()) + a.p_days * 86400000 }); }
+        if (p.status !== 'paid') { p.status = 'paid'; p.payment_id = a.p_payment; p.days = a.p_days; const prev = db.subs.get(a.p_user); db.subs.set(a.p_user, { status: 'active', until: Math.max(prev?.until ?? 0, Date.now()) + a.p_days * 86400000 }); }
         return send(200, new Date(db.subs.get(a.p_user).until).toISOString());
       }
       if (fn === 'fail_payment') { const p = db.payments.get(a.p_order); if (p?.status === 'created') p.status = 'failed'; return send(200, null); }
+      if (fn === 'apply_payment_refund') {     // same rules as supabase/migrations/007 (the real SQL is tested in db5.test.mjs)
+        if (db.no007) return send(404, { code: 'PGRST202', message: 'function not found' });
+        const p = [...db.payments.values()].find(x => x.payment_id === a.p_payment);
+        if (!p) return send(200, 'unknown_payment');
+        if (db.refunds.has(a.p_refund)) return send(200, 'duplicate');
+        if (p.status !== 'paid' && p.status !== 'refunded') return send(200, 'not_paid');
+        const amt = Math.min(a.p_amount, p.amount - (p.refunded || 0)); if (amt <= 0) return send(200, 'nothing_left');
+        p.refunded = (p.refunded || 0) + amt; if (p.refunded >= p.amount) p.status = 'refunded';
+        if (p.purpose === 'premium') {
+          const target = Math.min(p.days, Math.ceil(p.days * p.refunded / p.amount)), delta = target - (p.daysRemoved || 0); p.daysRemoved = target;
+          const sub = db.subs.get(p.user_id); if (sub && delta > 0) { sub.until -= delta * 86400000; if (sub.status === 'active' && sub.until <= Date.now()) sub.status = 'cancelled'; }
+        }
+        db.refunds.add(a.p_refund); return send(200, 'applied');
+      }
       if (fn === 'mark_payment_refunded') { for (const [, p] of db.payments) if (p.payment_id === a.p_payment && p.status === 'paid') { p.status = 'refunded'; db.subs.set(p.user_id, { status: 'cancelled' }); } return send(200, null); }
       return send(404, { message: 'unknown rpc' });
     }
@@ -248,6 +264,55 @@ test('webhook: payment.failed and refund.processed update records, a refund canc
   await webhookCall(evt('payment.captured', rz.payments.get(p2))); assert.equal(db.subs.get(CAROL).status, 'active');
   await webhookCall(evt('refund.processed', { id: 'rfnd_1', payment_id: p2 }));
   assert.equal(db.payments.get(o2.order_id).status, 'refunded'); assert.equal(db.subs.get(CAROL).status, 'cancelled');
+});
+test('refund (007): a refund is applied by Razorpay refund id + amount, and a repeated webhook is applied once', async () => {
+  const { body: o } = await newOrder('dora'); const pid = capture(o, 'pay_RFNDONCE00001');
+  await webhookCall(evt('payment.captured', rz.payments.get(pid)));
+  const ev = evt('refund.processed', { id: 'rfnd_ONCE00000001', payment_id: pid, amount: 9900, status: 'processed' });
+  assert.equal((await webhookCall(ev)).status, 200); assert.equal((await webhookCall(ev)).status, 200);   // Razorpay retries
+  const calls = db.rpcCalls.filter(([f, a]) => f === 'apply_payment_refund' && a.p_refund === 'rfnd_ONCE00000001');
+  assert.equal(calls.length, 2); assert.deepEqual([calls[0][1].p_payment, calls[0][1].p_amount], [pid, 9900]);
+  assert.equal(db.payments.get(o.order_id).refunded, 9900, 'counted once'); assert.equal(db.payments.get(o.order_id).status, 'refunded');
+});
+test('refund (007): two Premium payments, refunding one keeps the days of the other', async () => {
+  const { body: o1 } = await newOrder('erin'); const p1 = capture(o1, 'pay_ERINFIRST0001');
+  const { body: o2 } = await newOrder('erin'); const p2 = capture(o2, 'pay_ERINSECOND001');
+  await webhookCall(evt('payment.captured', rz.payments.get(p1))); await webhookCall(evt('payment.captured', rz.payments.get(p2)));
+  const sixty = db.subs.get(ERIN).until;
+  await webhookCall(evt('refund.processed', { id: 'rfnd_ERINFIRST0001', payment_id: p1, amount: 9900 }));
+  assert.equal(db.subs.get(ERIN).status, 'active', 'the second payment still covers 30 days');
+  assert.equal(Math.round((sixty - db.subs.get(ERIN).until) / 86400000), 30, 'exactly the 30 refunded days are removed');
+  assert.equal(db.payments.get(o2.order_id).status, 'paid');
+});
+test('refund (007): a partial refund removes the same share of the days; refunds never exceed the payment', async () => {
+  const { body: o } = await newOrder('frank'); const pid = capture(o, 'pay_FRANKPART0001');
+  await webhookCall(evt('payment.captured', rz.payments.get(pid))); const full = db.subs.get(FRANK).until;
+  await webhookCall(evt('refund.processed', { id: 'rfnd_FRANKHALF0001', payment_id: pid, amount: 4950 }));
+  assert.equal(Math.round((full - db.subs.get(FRANK).until) / 86400000), 15); assert.equal(db.subs.get(FRANK).status, 'active');
+  assert.equal(db.payments.get(o.order_id).status, 'paid');
+  await webhookCall(evt('refund.processed', { id: 'rfnd_FRANKREST0001', payment_id: pid, amount: 9900 }));   // asks for more than is left
+  assert.equal(db.payments.get(o.order_id).refunded, 9900); assert.equal(db.payments.get(o.order_id).status, 'refunded');
+  assert.equal(db.subs.get(FRANK).status, 'cancelled');
+});
+test('refund: refund.failed changes nothing; a refund webhook with a bad signature is rejected', async () => {
+  const { body: o } = await newOrder('gina'); const pid = capture(o, 'pay_GINAFAIL00001');
+  await webhookCall(evt('payment.captured', rz.payments.get(pid)));
+  const before = db.rpcCalls.length;
+  assert.equal((await webhookCall(evt('refund.failed', { id: 'rfnd_GINAFAIL0001', payment_id: pid, amount: 9900, status: 'failed' }))).status, 200);
+  assert.equal(db.rpcCalls.length, before, 'no database call for a failed refund');
+  assert.equal((await webhookCall(evt('refund.processed', { id: 'rfnd_GINAFORGE001', payment_id: pid, amount: 9900 }), { secret: 'attacker-secret' })).status, 400);
+  assert.equal(db.subs.get(GINA).status, 'active'); assert.equal(db.payments.get(o.order_id).status, 'paid');
+});
+test('refund: a database without migration 007 falls back to the old full-refund rule', async () => {
+  const { body: o } = await newOrder('hana'); const pid = capture(o, 'pay_HANAOLD00001');
+  await webhookCall(evt('payment.captured', rz.payments.get(pid)));
+  db.no007 = true; const r = await webhookCall(evt('refund.processed', { id: 'rfnd_HANAOLD00001', payment_id: pid, amount: 9900 })); db.no007 = false;
+  assert.equal(r.status, 200); assert.ok(db.rpcCalls.some(([f, a]) => f === 'mark_payment_refunded' && a.p_payment === pid));
+  assert.equal(db.payments.get(o.order_id).status, 'refunded');
+});
+test('there is no client-side refund endpoint: refunds only come from signed Razorpay webhooks', async () => {
+  for (const p of ['/api/payments/refund', '/api/payments/refunds', '/api/refund'])
+    assert.ok([404, 405].includes((await call(p, { method: 'POST', token: TOK.alice, json: { payment_id: 'pay_X', amount: 9900 } })).status), p);
 });
 test('webhook: a temporary database failure returns 500 so Razorpay retries', async () => {
   const { body: o } = await newOrder('bob'); const pid = capture(o, 'pay_WHRETRY000001');

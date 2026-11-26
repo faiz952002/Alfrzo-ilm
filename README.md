@@ -9,10 +9,10 @@ Islamic sawal-jawab platform: log sawal puchte hain, **verified aalim/mufti** ja
 ## Setup (ek baar)
 
 1. **Supabase project banao** — https://supabase.com (free plan se shuru ho sakta hai).
-2. **SQL Editor** me `supabase/migrations/` ki files **isi order me** ek-ek karke Run karo: `000` (sirf check) → `001` … `006`,
+2. **SQL Editor** me `supabase/migrations/` ki files **isi order me** ek-ek karke Run karo: `000` (sirf check) → `001` … `007`,
    phir `supabase/DATABASE_HEALTH_CHECK.sql` (20/20 aana chahiye). Poori guide: `docs/SUPABASE_SETUP_GUIDE.md`.
-   (Pehle se 001–005 wala project? Sirf `006_phase1_fixes.sql` chalao. `patch_004.sql` seedha mat chalao.)
-   Purani files `schema.sql` + `patch_001…004.sql` sirf history aur local tests ke liye hain.
+   (Pehle se 001–005 wala project? Sirf `006_phase1_fixes.sql`, phir `007_premium_refund_correction.sql` chalao. `patch_004.sql` seedha mat chalao.)
+   Purani files `schema.sql` + `patch_001…004.sql` sirf history ke liye hain (`LEGACY=1 bash tests/reset-db.sh`).
 3. **Authentication > URL Configuration:** Site URL = aapki site; Redirect URLs me `https://your-domain.com/reset` jodo.
 4. **Deploy** (Render example): repo GitHub par daalo → Render > New > Blueprint (`render.yaml`) → env vars bharo (`.env.example` dekho).
    Local chalane ke liye: `SUPABASE_URL=... SUPABASE_ANON_KEY=... npm start` → http://localhost:3000

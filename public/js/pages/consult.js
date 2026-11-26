@@ -20,12 +20,16 @@ export default async function consult(view, ctx) {
   ctx.setTitle(t('consult.title'));
   view.append(pageTitle(t('consult.title')), ...skeletons(2));
   if (!/^[0-9a-f-]{36}$/i.test(sid)) return S.go('/scholars', true);
-  await S.sb.rpc('consultation_housekeeping').catch(() => null);   // frees expired unpaid holds so their times show again
-  const [s, sv, sl] = await Promise.all([
+  // Logged-in users release expired unpaid holds first; visitors cannot run it (migration 006) and do not need to:
+  // the bookable_slots view already shows those times as free, and booking releases them before it books.
+  if (S.user) await S.sb.rpc('consultation_housekeeping').catch(() => null);
+  const openSlots = () => S.sb.from('scholar_slots').select('id,starts_at').eq('scholar_id', sid).eq('status', 'open').gt('starts_at', new Date().toISOString()).order('starts_at').limit(120);
+  let [s, sv, sl] = await Promise.all([
     S.sb.from('scholar_directory').select('*').eq('id', sid).maybeSingle(),
     S.sb.from('scholar_services').select('*').eq('scholar_id', sid).eq('active', true),
-    S.sb.from('scholar_slots').select('id,starts_at').eq('scholar_id', sid).eq('status', 'open').gt('starts_at', new Date().toISOString()).order('starts_at').limit(120),
+    S.sb.from('bookable_slots').select('id,starts_at').eq('scholar_id', sid).order('starts_at').limit(120),
   ]);
+  if (sl.error) sl = await openSlots();   // database without migration 006: the view does not exist yet
   if (!ctx.alive()) return; clear(view); view.append(pageTitle(t('consult.title')));
   if (!s.data) { view.append(empty('help', t('sch.notfound'), h('a.btn.sm', { href: '/scholars' }, t('nav.scholars')))); return; }
   const sc = s.data;
