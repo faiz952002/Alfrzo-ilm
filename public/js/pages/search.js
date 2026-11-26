@@ -23,7 +23,7 @@ export default async function search(view, ctx) {
     clear(results);
     if (!q) {
       const r = recent();
-      if (r.length) results.append(h('div.card', h('b', t('search.recent')), ...r.map(x => h('button.li', { type: 'button', onclick: () => { input.value = x; run(false); } }, icon('clock', 'l'), h('span.grow', x)))));
+      if (r.length) results.append(h('div.card.list.recent', h('b.recent-h', t('search.recent')), ...r.map(x => h('button.li', { type: 'button', onclick: () => { input.value = x; run(false); } }, icon('clock', 'l'), h('span.grow', x)))));
       else results.append(empty('search', t('search.hint')));
       return;
     }
