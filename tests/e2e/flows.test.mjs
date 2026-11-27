@@ -363,6 +363,32 @@ test('reporting: user reports an answer and a reel, admin hides both, they disap
   }
 });
 
+// ============================== instant revisits ==============================
+test('a page seen before appears at once on a slow network, then the fresh page replaces it; copies are per person', async () => {
+  const { page } = user;
+  const nav = href => page.evaluate(x => { const a = document.createElement('a'); a.href = x; document.body.append(a); a.click(); a.remove(); }, href);
+  await go(page, '/my-questions'); await page.waitForSelector('main .card'); await page.waitForFunction(() => !document.querySelector('main .skeleton'));
+  const firstText = await page.locator('main#view').innerText();
+  await nav('/saved'); await page.waitForFunction(() => location.pathname === '/saved' && !document.querySelector('main .skeleton'));
+  // the database answers slowly from now on
+  await page.route(/\/rest\/v1\/questions/, async r => { await new Promise(res => setTimeout(res, 1500)); r.continue(); });
+  const t0 = Date.now(); await nav('/my-questions');
+  await page.waitForSelector('main.snap', { timeout: 500 });
+  assert.ok(Date.now() - t0 < 500, 'the earlier picture shows at once');
+  assert.equal(await page.locator('main.snap').innerText(), firstText, 'the picture is the page as it was');
+  assert.equal(await page.locator('main.snap').evaluate(e => e.inert), true, 'the picture cannot be clicked');
+  assert.equal(await page.locator('main.snap [id]').count(), 0, 'no duplicate ids');
+  await page.waitForSelector('main.snap', { state: 'detached', timeout: 8000 });
+  assert.ok(Date.now() - t0 >= 1400, 'it stays until the fresh data has arrived');
+  assert.equal(await page.locator('main#view').isVisible(), true);
+  assert.equal(await page.locator('main').count(), 1);
+  await page.unroute(/\/rest\/v1\/questions/);
+  // never for forms / settings
+  await nav('/settings'); await page.waitForSelector('#dn'); await nav('/saved'); await page.waitForFunction(() => location.pathname === '/saved');
+  await nav('/settings'); assert.equal(await page.locator('main.snap').count(), 0);
+  await page.waitForSelector('#dn');
+});
+
 // ============================== account ==============================
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEklEQVR4nGP4z8CAFWEXHbQSACj/P8Fu7N9hAAAAAElFTkSuQmCC', 'base64');
 test('profile: header, statistics from the database, completion and recent activity', async () => {

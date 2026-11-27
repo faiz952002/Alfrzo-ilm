@@ -30,18 +30,62 @@ export function navigate(path, replace = false) {
 }
 S.go = navigate;
 
+// ---------------- instant revisits ----------------
+// The database is far away (Australia), so every page waits for it. When a page that was already seen in this
+// tab is opened again, a picture of it (a copy of what was on screen, not clickable) is shown at once while the
+// real page loads fresh data behind it; the real page replaces it as soon as its loading placeholders are gone.
+// Copies live in memory only, belong to one signed-in person and language, and are dropped when anyone signs
+// in or out. Pages with forms, chat, video or admin tools are never copied.
+const SNAP_SKIP = /^\/(login|signup|forgot|reset|ask|settings|messages|reels|admin|dashboard|consult\/|become-scholar)/;
+const SNAP_MAX = 12, SNAP_AGE = 10 * 60 * 1000;
+const snaps = new Map();
+let shown = null, snapEl = null, snapObs = null, snapTimer = null;
+const snapKey = path => `${S.user?.id || '-'}|${getLang()}|${path}`;
+const loading = () => !!view.querySelector('.skeleton, .skel');
+function keepSnap() {
+  if (!shown || view.classList.contains('pending') || !view.firstChild || loading() || SNAP_SKIP.test(shown.path)) return;
+  const c = view.cloneNode(true);
+  c.removeAttribute('id'); c.removeAttribute('tabindex'); c.className = 'snap';
+  c.querySelectorAll('[id]').forEach(e => e.removeAttribute('id'));
+  c.querySelectorAll('video,audio,iframe,input[type=file]').forEach(e => e.remove());
+  snaps.delete(shown.key); snaps.set(shown.key, { el: c, at: Date.now() });
+  while (snaps.size > SNAP_MAX) snaps.delete(snaps.keys().next().value);
+}
+function dropSnap() {
+  snapObs?.disconnect(); snapObs = null; clearTimeout(snapTimer);
+  snapEl?.remove(); snapEl = null; view.classList.remove('pending'); view.removeAttribute('aria-hidden');
+}
+export function forgetSnaps() { snaps.clear(); }
+S.forgetSnaps = forgetSnaps;
+// the real page is ready when it has finished rendering and shows no loading placeholders
+function revealWhenReady(my) {
+  if (!snapEl) return;
+  const done = () => { if (my === token) dropSnap(); };
+  if (!loading()) return done();
+  snapObs = new MutationObserver(() => { if (!loading()) done(); });
+  snapObs.observe(view, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+}
+
 async function render() {
   const my = ++token;
+  keepSnap();
   cleanups.forEach(f => { try { f(); } catch {} }); cleanups = [];
-  closeDrawer();
+  closeDrawer(); dropSnap();
   const url = new URL(location.href);
   const route = routes.find(r => r.re.test(url.pathname));
   const params = route ? url.pathname.match(route.re).groups || {} : {};
   clear(view); view.className = 'fade-in'; window.scrollTo(0, 0);
   document.body.classList.toggle('is-home', url.pathname === '/');
   paintNav(url.pathname);
+  shown = null;
   if (!isConfigured()) return renderSetup();
   if (offline) return renderOffline();
+  const key = snapKey(url.pathname + url.search), old = snaps.get(key);
+  if (old && Date.now() - old.at < SNAP_AGE && !SNAP_SKIP.test(url.pathname)) {
+    snapEl = old.el.cloneNode(true); snapEl.inert = true; snapEl.setAttribute('aria-hidden', 'true');
+    view.before(snapEl); view.classList.add('pending'); view.setAttribute('aria-hidden', 'true');
+    snapTimer = setTimeout(() => { if (my === token) dropSnap(); }, 8000);   // never hide the real page for long
+  }
   const ctx = {
     params, query: url.searchParams, path: url.pathname, alive: () => my === token,
     cleanup: fn => cleanups.push(fn), setTitle: (a, b, c) => setMeta(a, b, c),
@@ -51,9 +95,10 @@ async function render() {
     const mod = await import(`./pages/${route ? route.mod : 'notfound'}.js`);
     if (my !== token) return;
     await mod.default(view, ctx);
+    if (my === token) { shown = { key, path: url.pathname }; revealWhenReady(my); }
   } catch (e) {
     console.error(e);
-    if (my === token) { clear(view).append(h('div.empty', icon('alert'), h('p', t('err.generic')), h('button.btn.ghost.sm', { onclick: () => render() }, t('retry')))); }
+    if (my === token) { dropSnap(); clear(view).append(h('div.empty', icon('alert'), h('p', t('err.generic')), h('button.btn.ghost.sm', { onclick: () => render() }, t('retry')))); }
   }
 }
 
@@ -196,6 +241,7 @@ async function boot() {
     let savedLang = null; try { savedLang = localStorage.getItem('askdeen.lang'); } catch { /* storage blocked */ }
     if (S.profile?.language && !savedLang) { setLang(S.profile.language); buildShell(root); }
     S.sb.auth.onChange(async ev => {
+      if (ev === 'SIGNED_IN' || ev === 'SIGNED_OUT') forgetSnaps();
       try { await loadProfile(); } catch { /* offline: keep the current state */ }
       pollUnread();
       if (ev === 'SIGNED_OUT') { S.unread = 0; S.unreadMsgs = 0; S.refreshShell(); if (/^\/(profile|my-|saved|following|settings|notifications|dashboard|admin|ask|messages|consult)/.test(location.pathname)) navigate('/login', true); }

@@ -733,3 +733,10 @@ a.card,a.card:hover{text-decoration:none;color:var(--ink)}
 .switch.locked{cursor:default;opacity:.75}
 .danger-zone{border-color:#e8b4ad}
 @media (prefers-reduced-motion:reduce){.stat-grid .stat,.complete .bar i{transition:none}}
+
+/* instant revisits: the saved picture of a page is shown while the real page loads behind it */
+#view.pending{position:fixed;inset:0;visibility:hidden;pointer-events:none;overflow:hidden}
+main.snap{position:relative}
+main.snap::before{content:"";position:fixed;top:0;left:0;height:3px;width:40%;background:var(--gold);z-index:60;animation:snapbar 1s ease-in-out infinite alternate}
+@keyframes snapbar{from{transform:translateX(-10%)}to{transform:translateX(160%)}}
+@media (prefers-reduced-motion:reduce){main.snap::before{animation:none;width:100%;opacity:.5}}
