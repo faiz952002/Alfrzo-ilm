@@ -19,6 +19,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700;800&family=Noto+Sans:wght@400;600;700&family=Noto+Nastaliq+Urdu:wght@400;600&family=Playfair+Display:ital,wght@0,600;0,700;1,600&display=swap">
 <link rel="stylesheet" href="/css/app.css">
+<!-- fetch the app's core modules in parallel instead of one import level after another -->
+<link rel="modulepreload" href="/js/app.js"><link rel="modulepreload" href="/js/store.js"><link rel="modulepreload" href="/js/i18n.js"><link rel="modulepreload" href="/js/ui.js"><link rel="modulepreload" href="/js/sb.js"><link rel="modulepreload" href="/js/i18n.v2.js"><link rel="modulepreload" href="/js/i18n.ui3.js"><link rel="modulepreload" href="/js/components.js"><link rel="modulepreload" href="/js/i18n.pages.js">
 <style>.boot-fallback{opacity:0;animation:boot-show 0s 4s forwards;padding:40px 24px;text-align:center;font-family:sans-serif;color:#f4ecdc;background:#0a1836;min-height:100vh}.boot-fallback a{color:#e3b45c}@keyframes boot-show{to{opacity:1}}</style>
 </head>
 <body>

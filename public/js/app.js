@@ -176,8 +176,15 @@ async function connect() {
   return !offline;
 }
 
+// Start downloading the page's code while the session and profile load (the page only runs after that).
+function prefetchPage() {
+  const route = routes.find(r => r.re.test(location.pathname));
+  import(`./pages/${route ? route.mod : 'notfound'}.js`).catch(() => {});
+}
+
 async function boot() {
   initLang();
+  prefetchPage();
   const root = document.getElementById('root');
   buildShell(root);
   if (isConfigured()) {
