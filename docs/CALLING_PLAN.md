@@ -13,8 +13,8 @@ nothing pushed, merged or deployed; no production SQL. Migration `supabase/migra
 | 4 | Cancelled, expired, unconfirmed bookings never allow calls | `consultation_callable()`: status `confirmed`, time window 10 min before start → 15 min after end; re-checked at every token request (`call_join()`) |
 | 5 | Paid bookings need a verified payment | `consultation_callable()`: price 0, or a `payments` row `purpose='consultation'`, `status='paid'` (a refunded payment no longer counts) |
 | – | A booking's kind is respected | `chat` bookings never become calls; `audio` → voice only; `video` → voice or video |
-| 6 | Only scholars and admins create group calls | `group_session_create()` requires `is_scholar()` (verified, not suspended) or `is_admin()` |
-| 7 | Group members explicitly invited and authorised for the same session | host invites **through one of their own confirmed/completed bookings** (never by user id); the client must **accept** that session; only accepted members get media access |
+| 6 | Only scholars and admins create group calls | `group_host_ok()`: `is_scholar()` (verified, not suspended, from 002) or `is_admin()` + not suspended; re-checked at every host action (invite, remove, start); members cannot join a suspended host's call |
+| 7 | Group members explicitly invited and authorised for the same session | host invites **through one of their own confirmed/completed bookings** (never by user id, also for admins); the client must **accept**; only accepted members get media access; a removed member is never re-invited; nothing can be accepted in a cancelled / ended / finished session |
 | 8 | No mixing of unrelated users/bookings | each group belongs to one host's session; a call never pulls in anyone who has not accepted that session |
 | 9 | Anonymity and privacy kept | other people are shown with the existing chat rule (scholar by name; client only if they do not keep questions anonymous), media identities are random per call, no user ids reach the browser, contact-info filter on session titles, camera starts OFF in group calls |
 

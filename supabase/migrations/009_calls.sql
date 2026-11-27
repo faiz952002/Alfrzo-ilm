@@ -7,8 +7,9 @@
 --   * the consultation must be 'confirmed', inside its time window (10 min before start .. 15 min after its end),
 --     of kind 'audio' (voice only) or 'video' (voice or video) - a 'chat' booking never becomes a call
 --   * a paid consultation also needs a verified, not refunded payment for it (no bypass of the payment rules)
---   * group calls only inside a group session created by a verified scholar or an admin; every member is explicitly
---     invited (through a confirmed/completed consultation they had with that host) AND has accepted that session
+--   * group calls only inside a FREE group session hosted by a verified, non-suspended scholar or a non-suspended admin;
+--     every member is explicitly invited through a confirmed/completed consultation they had WITH THAT HOST (no
+--     unrelated bookings) AND has accepted that session; the host is re-checked at every host action
 --   * nobody can write the call tables directly; every change goes through the functions below, which take the
 --     caller from auth.uid() (never from a parameter). Other people are never shown by user id, only by the same
 --     name rule as the existing chat (a client who keeps questions anonymous stays anonymous).
@@ -100,25 +101,39 @@ alter table public.notifications add constraint notifications_type_check
 -- ---------------------------------------------------------------------
 -- the name another person may see: scholars by name; a client only if they do not keep questions anonymous
 create or replace function public.call_label(p_user uuid) returns text
-language sql stable security definer set search_path = public as $$
+language sql stable security definer set search_path = public, pg_temp as $$
   select case when exists (select 1 from public.scholars s where s.id = p_user) then p.display_name
               when p.default_anonymous then null else p.display_name end
     from public.profiles p where p.id = p_user;
 $$;
 
--- a consultation may be used for a call right now (status, window, kind, payment)
+-- a consultation may be used for a call right now (status, window, kind, payment, nobody suspended).
+-- Payment (004/007 schema): a paid booking needs a payments row for THIS booking (purpose 'consultation', ref_id),
+-- by its client, status 'paid' (a fully refunded payment has status 'refunded'), for at least the booking price,
+-- and not fully refunded (refunded_paise < amount_paise).
 create or replace function public.consultation_callable(k public.consultations, p_video boolean) returns boolean
-language sql stable security definer set search_path = public as $$
+language sql stable security definer set search_path = public, pg_temp as $$
   select k.status = 'confirmed'
      and now() between k.starts_at - interval '10 minutes' and k.starts_at + make_interval(mins => k.duration_min) + interval '15 minutes'
      and (k.kind = 'video' or (k.kind = 'audio' and not p_video))
-     and (k.price_paise = 0 or exists (select 1 from public.payments y where y.purpose = 'consultation' and y.ref_id = k.id and y.status = 'paid'))
+     and (k.price_paise = 0 or exists (select 1 from public.payments y
+            where y.purpose = 'consultation' and y.ref_id = k.id and y.user_id = k.user_id and y.status = 'paid'
+              and y.amount_paise >= k.price_paise and y.refunded_paise < y.amount_paise))
+     and exists (select 1 from public.scholars s where s.id = k.scholar_id and s.verified)
      and not exists (select 1 from public.profiles p where p.id in (k.user_id, k.scholar_id) and p.suspended);
+$$;
+
+-- may the signed-in person host group sessions right now? verified + not suspended scholar (is_scholar() from 002),
+-- or an admin (is_admin() from 001 does not look at suspension, so it is checked here)
+create or replace function public.group_host_ok() returns boolean
+language sql stable security definer set search_path = public, pg_temp as $$
+  select public.is_scholar()
+      or (public.is_admin() and exists (select 1 from public.profiles p where p.id = auth.uid() and not p.suspended));
 $$;
 
 -- unanswered calls become 'missed' after 45 seconds; calls end when their window is over
 create or replace function public.call_housekeeping() returns void
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, pg_temp as $$
 declare r record;
 begin
   for r in
@@ -147,7 +162,7 @@ end $$;
 -- 3) one-to-one calls from a consultation
 -- ---------------------------------------------------------------------
 create or replace function public.call_start(p_consultation uuid, p_video boolean) returns uuid
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, pg_temp as $$
 declare me uuid := auth.uid(); k public.consultations; other uuid; cid uuid;
 begin
   if me is null then raise exception 'NOT_AUTHENTICATED' using errcode = 'P0001'; end if;
@@ -170,7 +185,7 @@ end $$;
 
 -- the invited person answers (accept / decline)
 create or replace function public.call_answer(p_call uuid, p_accept boolean) returns text
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, pg_temp as $$
 declare me uuid := auth.uid(); c public.calls;
 begin
   perform public.call_housekeeping();
@@ -190,7 +205,7 @@ end $$;
 
 -- leave / cancel / hang up. In a one-to-one call either side ends it for both; in a group only the host does (call_end_all)
 create or replace function public.call_hangup(p_call uuid) returns text
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, pg_temp as $$
 declare me uuid := auth.uid(); c public.calls;
 begin
   select * into c from public.calls where id = p_call for update;
@@ -210,11 +225,11 @@ end $$;
 -- 4) group sessions and group calls
 -- ---------------------------------------------------------------------
 create or replace function public.group_session_create(p_title text, p_starts_at timestamptz, p_duration_min int, p_video boolean, p_capacity int) returns uuid
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, pg_temp as $$
 declare sid uuid;
 begin
-  if not (public.is_scholar() or public.is_admin()) then raise exception 'FORBIDDEN' using errcode = 'P0001'; end if;
-  if p_starts_at < now() - interval '5 minutes' then raise exception 'BAD_TIME' using errcode = 'P0001'; end if;
+  if not public.group_host_ok() then raise exception 'FORBIDDEN' using errcode = 'P0001'; end if;
+  if p_starts_at is null or p_starts_at < now() - interval '5 minutes' then raise exception 'BAD_TIME' using errcode = 'P0001'; end if;
   if public.contains_contact_info(coalesce(p_title, '')) then raise exception 'CONTACT_INFO' using errcode = 'P0001'; end if;
   insert into public.group_sessions (host_id, title, video, starts_at, duration_min, capacity)
     values (auth.uid(), btrim(p_title), coalesce(p_video, true), p_starts_at, p_duration_min, p_capacity) returning id into sid;
@@ -222,40 +237,59 @@ begin
   return sid;
 end $$;
 
--- the host invites the client of one of THEIR confirmed / completed consultations (the client is never chosen by user id)
+-- the host invites the client of one of THEIR OWN confirmed / completed consultations (the client is never chosen by
+-- user id). A notification is sent only when an invitation is really created or a declined one is renewed.
+-- A removed member is never re-invited; an already invited / accepted member is left as is.
 create or replace function public.group_session_invite(p_session uuid, p_consultation uuid) returns text
-language plpgsql security definer set search_path = public as $$
-declare g public.group_sessions; k public.consultations;
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare g public.group_sessions; k public.consultations; cur text; n int;
 begin
+  if not public.group_host_ok() then raise exception 'FORBIDDEN' using errcode = 'P0001'; end if;
   select * into g from public.group_sessions where id = p_session for update;
-  if not found or g.host_id <> auth.uid() or g.status <> 'scheduled' then raise exception 'FORBIDDEN' using errcode = 'P0001'; end if;
+  if not found or g.host_id <> auth.uid() or g.status <> 'scheduled'
+     or now() > g.starts_at + make_interval(mins => g.duration_min) then raise exception 'FORBIDDEN' using errcode = 'P0001'; end if;
   select * into k from public.consultations where id = p_consultation;
-  if not found or k.status not in ('confirmed','completed') or (k.scholar_id <> g.host_id and not public.is_admin()) then
+  if not found or k.status not in ('confirmed','completed') or k.scholar_id <> g.host_id or k.user_id = g.host_id then
     raise exception 'FORBIDDEN' using errcode = 'P0001';
   end if;
+  select status into cur from public.group_session_members where session_id = p_session and user_id = k.user_id;
+  if cur in ('invited','accepted') then return 'already'; end if;
+  if cur = 'removed' then raise exception 'MEMBER_REMOVED' using errcode = 'P0001'; end if;
   if (select count(*) from public.group_session_members where session_id = p_session and status in ('invited','accepted')) >= g.capacity then
     raise exception 'SESSION_FULL' using errcode = 'P0001';
   end if;
-  insert into public.group_session_members (session_id, user_id, via_consultation) values (p_session, k.user_id, k.id)
-    on conflict (session_id, user_id) do update set status = 'invited', via_consultation = excluded.via_consultation, invited_at = now(), responded_at = null
-      where group_session_members.status in ('declined');            -- a removed member is not re-invited silently
+  if cur is null then
+    insert into public.group_session_members (session_id, user_id, via_consultation) values (p_session, k.user_id, k.id);
+  else   -- 'declined' -> invited again
+    update public.group_session_members set status = 'invited', via_consultation = k.id, invited_at = now(), responded_at = null
+     where session_id = p_session and user_id = k.user_id and status = 'declined';
+  end if;
+  get diagnostics n = row_count;
+  if n <> 1 then return 'already'; end if;
   insert into public.notifications (user_id, type, data, link)
     values (k.user_id, 'call', jsonb_build_object('msg', 'group_invite', 'title', g.title, 'at', g.starts_at), '/calls');
   return 'invited';
 end $$;
 
 create or replace function public.group_session_respond(p_session uuid, p_accept boolean) returns text
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare g public.group_sessions;
 begin
-  update public.group_session_members set status = case when p_accept then 'accepted' else 'declined' end, responded_at = now()
-   where session_id = p_session and user_id = auth.uid() and status in ('invited','accepted','declined');
-  return case when found then (case when p_accept then 'accepted' else 'declined' end) else 'gone' end;
+  select * into g from public.group_sessions where id = p_session;
+  if not found or g.status <> 'scheduled' or now() > g.starts_at + make_interval(mins => g.duration_min) or g.host_id = auth.uid() then
+    return 'gone';                                         -- cancelled, ended, over, unknown, or the host itself
+  end if;
+  update public.group_session_members set status = case when coalesce(p_accept, false) then 'accepted' else 'declined' end, responded_at = now()
+   where session_id = p_session and user_id = auth.uid() and status in ('invited','accepted','declined');   -- never 'removed'
+  return case when not found then 'gone' when coalesce(p_accept, false) then 'accepted' else 'declined' end;
 end $$;
 
 create or replace function public.group_session_remove(p_session uuid, p_member_label_id uuid) returns text
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, pg_temp as $$
 begin   -- p_member_label_id is the member's call_participants.id or the consultation that invited them; never a user id
-  if not exists (select 1 from public.group_sessions where id = p_session and host_id = auth.uid()) then raise exception 'FORBIDDEN' using errcode = 'P0001'; end if;
+  if not public.group_host_ok() or not exists (select 1 from public.group_sessions where id = p_session and host_id = auth.uid()) then
+    raise exception 'FORBIDDEN' using errcode = 'P0001';
+  end if;
   update public.group_session_members m set status = 'removed', responded_at = now()
    where m.session_id = p_session and m.user_id <> auth.uid()
      and (m.via_consultation = p_member_label_id
@@ -264,12 +298,12 @@ begin   -- p_member_label_id is the member's call_participants.id or the consult
 end $$;
 
 create or replace function public.group_call_start(p_session uuid) returns uuid
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, pg_temp as $$
 declare g public.group_sessions; cid uuid;
 begin
   perform public.call_housekeeping();
   select * into g from public.group_sessions where id = p_session for update;
-  if not found or g.host_id <> auth.uid() or g.status <> 'scheduled'
+  if not found or g.host_id <> auth.uid() or g.status <> 'scheduled' or not public.group_host_ok()
      or now() not between g.starts_at - interval '10 minutes' and g.starts_at + make_interval(mins => g.duration_min) then
     raise exception 'CALL_NOT_ALLOWED' using errcode = 'P0001';
   end if;
@@ -285,11 +319,11 @@ end $$;
 
 -- host ends a group call for everyone (the server then closes the media room)
 create or replace function public.call_end_all(p_call uuid) returns text
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, pg_temp as $$
 declare c public.calls;
 begin
   select * into c from public.calls where id = p_call for update;
-  if not found or c.host_id <> auth.uid() then raise exception 'FORBIDDEN' using errcode = 'P0001'; end if;
+  if not found or c.host_id <> auth.uid() or c.group_session_id is null then raise exception 'FORBIDDEN' using errcode = 'P0001'; end if;
   if c.status in ('ringing','active') then
     update public.calls set status = 'ended', ended_at = now() where id = p_call;
     update public.call_participants set status = case when status = 'ringing' then 'missed' else 'left' end, left_at = now()
@@ -300,12 +334,14 @@ end $$;
 
 -- host removes one participant from a live group call (and from the session). Returns the participant id for the server.
 create or replace function public.call_remove(p_call uuid, p_participant uuid) returns uuid
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, pg_temp as $$
 declare c public.calls; p public.call_participants;
 begin
-  select * into c from public.calls where id = p_call;
-  if not found or c.host_id <> auth.uid() or c.group_session_id is null then raise exception 'FORBIDDEN' using errcode = 'P0001'; end if;
-  select * into p from public.call_participants where id = p_participant and call_id = p_call and role = 'guest';
+  select * into c from public.calls where id = p_call for update;
+  if not found or c.host_id <> auth.uid() or c.group_session_id is null or c.status not in ('ringing','active') then
+    raise exception 'FORBIDDEN' using errcode = 'P0001';
+  end if;
+  select * into p from public.call_participants where id = p_participant and call_id = p_call and role = 'guest' and status in ('ringing','joined');
   if not found then raise exception 'FORBIDDEN' using errcode = 'P0001'; end if;
   update public.call_participants set status = 'removed', left_at = now() where id = p.id;
   update public.group_session_members set status = 'removed', responded_at = now() where session_id = c.group_session_id and user_id = p.user_id;
@@ -317,7 +353,7 @@ end $$;
 --    then signs a short LiveKit token for exactly this room, identity and permissions.
 -- ---------------------------------------------------------------------
 create or replace function public.call_join(p_call uuid) returns jsonb
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, pg_temp as $$
 declare me uuid := auth.uid(); c public.calls; p public.call_participants; k public.consultations; n int;
 begin
   perform public.call_housekeeping();
@@ -328,6 +364,11 @@ begin
      and exists (select 1 from public.group_session_members where session_id = c.group_session_id and user_id = me and status = 'accepted') then
     insert into public.call_participants (call_id, user_id, role, status) values (c.id, me, 'guest', 'ringing') returning * into p;
   end if;
+  -- an accepted group member who declined the ring, missed it or left may (re)join while the call runs; 'removed' never
+  if p.id is not null and c.group_session_id is not null and p.status in ('declined','missed','left') and c.status in ('ringing','active')
+     and exists (select 1 from public.group_session_members where session_id = c.group_session_id and user_id = me and status = 'accepted') then
+    update public.call_participants set status = 'ringing', left_at = null where id = p.id returning * into p;
+  end if;
   if c.id is null or p.id is null or c.status not in ('ringing','active') or p.status not in ('joined','ringing') then
     raise exception 'CALL_NOT_ALLOWED' using errcode = 'P0001';
   end if;
@@ -336,7 +377,9 @@ begin
     select * into k from public.consultations where id = c.consultation_id;
     if not public.consultation_callable(k, c.video) then raise exception 'CALL_NOT_ALLOWED' using errcode = 'P0001'; end if;
   else
-    if not exists (select 1 from public.group_session_members where session_id = c.group_session_id and user_id = me and status = 'accepted') then
+    if not exists (select 1 from public.group_session_members where session_id = c.group_session_id and user_id = me and status = 'accepted')
+       or not exists (select 1 from public.group_sessions g join public.profiles hp on hp.id = g.host_id
+                       where g.id = c.group_session_id and g.status = 'scheduled' and not hp.suspended) then
       raise exception 'CALL_NOT_ALLOWED' using errcode = 'P0001';
     end if;
     select count(*) into n from public.call_participants where call_id = p_call and status = 'joined';
@@ -344,8 +387,11 @@ begin
   end if;
   if p.status = 'ringing' then update public.call_participants set status = 'joined', joined_at = now() where id = p.id; end if;
   if c.status = 'ringing' and c.group_session_id is not null then update public.calls set status = 'active', started_at = now() where id = c.id; end if;
+  -- the server turns this into a LiveKit token: this room only, short expiry, camera allowed only for video calls
+  -- and OFF at start in group calls ('camera_on_start'), identity derived from the participant id (not the user id)
   return jsonb_build_object('room', c.room_name, 'participant', p.id, 'video', c.video, 'host', p.role = 'host',
-                            'group', c.group_session_id is not null, 'name', coalesce(public.call_label(me), ''));
+                            'group', c.group_session_id is not null, 'camera_on_start', c.video and c.group_session_id is null,
+                            'name', coalesce(public.call_label(me), ''));
 end $$;
 
 -- ---------------------------------------------------------------------
@@ -353,7 +399,7 @@ end $$;
 -- ---------------------------------------------------------------------
 -- calls that are ringing for me right now (the app checks this while it is open)
 create or replace function public.call_incoming() returns table (call_id uuid, video boolean, is_group boolean, caller_name text, title text, created_at timestamptz)
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, pg_temp as $$
 begin
   perform public.call_housekeeping();
   return query
@@ -365,7 +411,7 @@ end $$;
 
 -- current state of one call for its participants (status, people with their labels and states)
 create or replace function public.call_state(p_call uuid) returns jsonb
-language plpgsql security definer set search_path = public as $$
+language plpgsql security definer set search_path = public, pg_temp as $$
 declare c public.calls;
 begin
   select * into c from public.calls where id = p_call;
@@ -396,11 +442,13 @@ select c.id, c.video, c.group_session_id is not null as is_group, c.status, c.cr
 -- my group sessions (as host or invited member)
 create or replace view public.group_session_list as
 select g.id, g.title, g.video, g.starts_at, g.duration_min, g.capacity, g.status, (g.host_id = auth.uid()) as i_am_host,
-       hp.display_name as host_name, m.status as my_status,
+       case when hs.id is not null then hp.display_name when hp.default_anonymous then null else hp.display_name end as host_name,
+       m.status as my_status,
        (select count(*) from public.group_session_members x where x.session_id = g.id and x.status = 'accepted')::int as accepted_count
   from public.group_sessions g
   join public.group_session_members m on m.session_id = g.id and m.user_id = auth.uid()
-  join public.profiles hp on hp.id = g.host_id;
+  join public.profiles hp on hp.id = g.host_id
+  left join public.scholars hs on hs.id = g.host_id;
 
 -- ---------------------------------------------------------------------
 -- PERMISSIONS
@@ -408,7 +456,8 @@ select g.id, g.title, g.video, g.starts_at, g.duration_min, g.capacity, g.status
 revoke all on public.calls, public.call_participants, public.group_sessions, public.group_session_members from public, anon, authenticated;
 revoke all on public.call_history, public.group_session_list from public, anon, authenticated;
 grant select on public.call_history, public.group_session_list to authenticated;
-revoke execute on function public.call_label(uuid), public.consultation_callable(public.consultations, boolean), public.call_housekeeping() from public, anon, authenticated;
+revoke execute on function public.call_label(uuid), public.consultation_callable(public.consultations, boolean), public.call_housekeeping(),
+  public.group_host_ok() from public, anon, authenticated;
 revoke execute on function public.call_start(uuid, boolean), public.call_answer(uuid, boolean), public.call_hangup(uuid), public.call_join(uuid),
   public.call_incoming(), public.call_state(uuid), public.call_end_all(uuid), public.call_remove(uuid, uuid),
   public.group_session_create(text, timestamptz, int, boolean, int), public.group_session_invite(uuid, uuid),
