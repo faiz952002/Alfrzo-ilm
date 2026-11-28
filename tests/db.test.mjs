@@ -3,7 +3,7 @@
 // Run: PGHOST=/tmp PGPORT=54329 PGUSER=postgres PGDATABASE=askdeen node --test tests/db.test.mjs
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { sqlAsync } from './lib/db.mjs';
 
 const ID = {
   admin: '00000000-0000-0000-0000-0000000000a1',
@@ -35,15 +35,7 @@ function parseCsv(text) {
 }
 const num = o => { for (const k in o) if (/^-?\d+$/.test(o[k]) && o[k].length < 10) o[k] = Number(o[k]); else if (o[k] === 't') o[k] = true; else if (o[k] === 'f') o[k] = false; return o; };
 
-function psql(script) {
-  return new Promise((resolve, reject) => {
-    const p = spawn('psql', ['-X', '-q', '--csv', '-v', 'ON_ERROR_STOP=1'], { env: { ...process.env, PGDATABASE: process.env.PGDATABASE || 'askdeen' } });
-    let out = '', err = '';
-    p.stdout.on('data', d => out += d); p.stderr.on('data', d => err += d);
-    p.on('close', code => code === 0 ? resolve(out) : reject(new Error(err.trim() || `psql exit ${code}`)));
-    p.stdin.end(script);
-  });
-}
+const psql = script => sqlAsync(script, { csv: true });   // every query goes through the database guard (tests/lib/db-guard.sh)
 const pool = { async query(q, p) { const rows = parseCsv(await psql(bind(q, p) + ';')).map(num); return { rows, rowCount: rows.length }; }, end() {} };
 
 // Run ONE statement as a Supabase-like identity (role + JWT claims), atomically.

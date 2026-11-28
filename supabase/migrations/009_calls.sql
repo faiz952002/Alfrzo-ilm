@@ -15,6 +15,10 @@
 --     name rule as the existing chat (a client who keeps questions anonymous stays anonymous).
 --   * no media tokens, API keys or secrets are stored here; LiveKit tokens are made by the server for one call,
 --     for a few minutes, after call_join() has confirmed that the person belongs to that call.
+--   * group calls are VOICE ONLY in this version: no camera for anyone in a group (database + server enforce it)
+--   * adjustable timings / limits live in app_settings with FIXED bounds written in this migration (admins can only
+--     choose values inside them); security rules (who may call, payment, privacy, group camera) are not settings
+--   * call_fallback_room(): the Jitsi fallback room, only under exactly the same booking rules as a LiveKit call
 -- Run AFTER 008. Safe-run guard: refuses before 008 or a second time and changes nothing when it refuses.
 -- =====================================================================
 begin;
@@ -29,16 +33,104 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------
+-- 0) adjustable settings with fixed bounds
+--    The bounds below are part of this migration: only a NEW migration can change them. Admins may choose values
+--    inside them (admin_set_setting); a value outside them, an unknown key or a wrong type is refused by the database.
+-- ---------------------------------------------------------------------
+create table public.app_settings (
+  key text primary key,
+  value jsonb not null,
+  updated_at timestamptz not null default now(),
+  updated_by uuid references public.profiles(id) on delete set null
+);
+alter table public.app_settings enable row level security;   -- no policies: only the functions below read / write it
+
+-- the specification of every setting: type, default, min, max (NULL = no numeric bound, booleans)
+create or replace function public.setting_spec(p_key text, out kind text, out default_value jsonb, out min_value numeric, out max_value numeric)
+language sql immutable set search_path = public, pg_temp as $$
+  select v.kind, v.d, v.lo, v.hi from (values
+    ('calls.ring_timeout_seconds', 'int',  '45'::jsonb,   15::numeric, 120::numeric),
+    ('calls.window_before_min',    'int',  '10'::jsonb,    0,           30),
+    ('calls.window_after_min',     'int',  '15'::jsonb,    0,           30),
+    ('calls.max_starts_per_10min', 'int',  '6'::jsonb,     1,           10),
+    ('groups.max_capacity',        'int',  '50'::jsonb,    2,           50),
+    ('calls.one_to_one_camera_on', 'bool', 'true'::jsonb,  null,        null)
+  ) v(k, kind, d, lo, hi) where k = p_key;
+$$;
+
+create or replace function public.setting_valid(p_key text, p_value jsonb) returns boolean
+language plpgsql immutable set search_path = public, pg_temp as $$
+declare s record;
+begin
+  select * into s from public.setting_spec(p_key);
+  if s.kind is null or p_value is null then return false; end if;
+  if s.kind = 'bool' then return jsonb_typeof(p_value) = 'boolean'; end if;
+  if jsonb_typeof(p_value) <> 'number' or (p_value::text)::numeric <> trunc((p_value::text)::numeric) then return false; end if;
+  return (p_value::text)::numeric between s.min_value and s.max_value;
+end $$;
+
+create or replace function public.app_settings_before_write() returns trigger
+language plpgsql security definer set search_path = public, pg_temp as $$
+begin
+  if not public.setting_valid(new.key, new.value) then raise exception 'BAD_SETTING' using errcode = 'P0001'; end if;
+  new.updated_at := now();
+  return new;
+end $$;
+create trigger app_settings_before_write before insert or update on public.app_settings
+  for each row execute function public.app_settings_before_write();
+
+-- readers used by the functions below (never by clients): stored value if valid, otherwise the default
+create or replace function public.setting_int(p_key text) returns int
+language sql stable security definer set search_path = public, pg_temp as $$
+  select (coalesce((select a.value from public.app_settings a where a.key = p_key and public.setting_valid(a.key, a.value)),
+                   (select default_value from public.setting_spec(p_key)))::text)::int;
+$$;
+create or replace function public.setting_bool(p_key text) returns boolean
+language sql stable security definer set search_path = public, pg_temp as $$
+  select (coalesce((select a.value from public.app_settings a where a.key = p_key and public.setting_valid(a.key, a.value)),
+                   (select default_value from public.setting_spec(p_key)))::text)::boolean;
+$$;
+
+-- admins (not suspended) read and change settings; every change is written to the audit log
+create or replace function public.admin_get_settings() returns table (key text, kind text, value jsonb, default_value jsonb, min_value numeric, max_value numeric, updated_at timestamptz)
+language plpgsql stable security definer set search_path = public, pg_temp as $$
+begin
+  if not (public.is_admin() and exists (select 1 from public.profiles p where p.id = auth.uid() and not p.suspended)) then
+    raise exception 'FORBIDDEN' using errcode = 'P0001';
+  end if;
+  return query select k.key, s.kind, coalesce(a.value, s.default_value), s.default_value, s.min_value, s.max_value, a.updated_at
+    from unnest(array['calls.ring_timeout_seconds','calls.window_before_min','calls.window_after_min','calls.max_starts_per_10min',
+                      'groups.max_capacity','calls.one_to_one_camera_on']) k(key)
+    cross join lateral public.setting_spec(k.key) s left join public.app_settings a on a.key = k.key order by k.key;
+end $$;
+
+create or replace function public.admin_set_setting(p_key text, p_value jsonb) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare old jsonb;
+begin
+  if not (public.is_admin() and exists (select 1 from public.profiles p where p.id = auth.uid() and not p.suspended)) then
+    raise exception 'FORBIDDEN' using errcode = 'P0001';
+  end if;
+  if not public.setting_valid(p_key, p_value) then raise exception 'BAD_SETTING' using errcode = 'P0001'; end if;
+  select value into old from public.app_settings where key = p_key;
+  insert into public.app_settings (key, value, updated_by) values (p_key, p_value, auth.uid())
+    on conflict (key) do update set value = excluded.value, updated_by = excluded.updated_by;
+  insert into public.audit_logs (actor_id, action, target, meta)
+    values (auth.uid(), 'setting_changed', p_key, jsonb_build_object('from', old, 'to', p_value));
+  return p_value;
+end $$;
+
+-- ---------------------------------------------------------------------
 -- 1) tables (no direct client access at all - see PERMISSIONS)
 -- ---------------------------------------------------------------------
 create table public.group_sessions (
   id uuid primary key default gen_random_uuid(),
   host_id uuid not null references public.profiles(id) on delete cascade,
   title text not null check (char_length(title) between 3 and 120),
-  video boolean not null default true,
+  video boolean not null default false check (video = false),        -- group calls are voice only in this version
   starts_at timestamptz not null,
   duration_min int not null check (duration_min between 15 and 180),
-  capacity int not null check (capacity between 2 and 50),          -- the server may enforce a lower limit (plan / config)
+  capacity int not null check (capacity between 2 and 50),          -- also limited by groups.max_capacity and the server's limit
   status text not null default 'scheduled' check (status in ('scheduled','ended','cancelled')),
   created_at timestamptz not null default now()
 );
@@ -66,7 +158,8 @@ create table public.calls (
   created_at timestamptz not null default now(),
   started_at timestamptz,
   ended_at timestamptz,
-  constraint calls_one_origin check ((consultation_id is null) <> (group_session_id is null))
+  constraint calls_one_origin check ((consultation_id is null) <> (group_session_id is null)),
+  constraint calls_group_voice_only check (group_session_id is null or not video)
 );
 create index calls_consultation_idx on public.calls (consultation_id) where consultation_id is not null;
 create index calls_session_idx on public.calls (group_session_id) where group_session_id is not null;
@@ -114,7 +207,8 @@ $$;
 create or replace function public.consultation_callable(k public.consultations, p_video boolean) returns boolean
 language sql stable security definer set search_path = public, pg_temp as $$
   select k.status = 'confirmed'
-     and now() between k.starts_at - interval '10 minutes' and k.starts_at + make_interval(mins => k.duration_min) + interval '15 minutes'
+     and now() between k.starts_at - make_interval(mins => public.setting_int('calls.window_before_min'))
+                   and k.starts_at + make_interval(mins => k.duration_min + public.setting_int('calls.window_after_min'))
      and (k.kind = 'video' or (k.kind = 'audio' and not p_video))
      and (k.price_paise = 0 or exists (select 1 from public.payments y
             where y.purpose = 'consultation' and y.ref_id = k.id and y.user_id = k.user_id and y.status = 'paid'
@@ -131,7 +225,7 @@ language sql stable security definer set search_path = public, pg_temp as $$
       or (public.is_admin() and exists (select 1 from public.profiles p where p.id = auth.uid() and not p.suspended));
 $$;
 
--- unanswered calls become 'missed' after 45 seconds; calls end when their window is over
+-- unanswered calls become 'missed' after calls.ring_timeout_seconds; calls end when their window is over
 create or replace function public.call_housekeeping() returns void
 language plpgsql security definer set search_path = public, pg_temp as $$
 declare r record;
@@ -139,21 +233,21 @@ begin
   for r in
     update public.call_participants p set status = 'missed'
       from public.calls c
-     where c.id = p.call_id and p.status = 'ringing' and p.role = 'guest' and c.created_at < now() - interval '45 seconds'
+     where c.id = p.call_id and p.status = 'ringing' and p.role = 'guest' and c.created_at < now() - make_interval(secs => public.setting_int('calls.ring_timeout_seconds'))
      returning p.user_id, c.id, c.video, c.group_session_id
   loop
     insert into public.notifications (user_id, type, data, link)
       values (r.user_id, 'call', jsonb_build_object('msg', 'missed', 'video', r.video, 'group', r.group_session_id is not null), '/calls');
   end loop;
   update public.calls c set status = 'missed', ended_at = now()
-   where c.status = 'ringing' and c.created_at < now() - interval '45 seconds'
+   where c.status = 'ringing' and c.created_at < now() - make_interval(secs => public.setting_int('calls.ring_timeout_seconds'))
      and not exists (select 1 from public.call_participants p where p.call_id = c.id and p.role = 'guest' and p.status = 'joined');
   update public.calls c set status = 'ended', ended_at = now()
    where c.status in ('ringing','active') and (
          (c.consultation_id is not null and not exists (select 1 from public.consultations k where k.id = c.consultation_id
-            and now() < k.starts_at + make_interval(mins => k.duration_min) + interval '15 minutes' and k.status = 'confirmed'))
+            and now() < k.starts_at + make_interval(mins => k.duration_min + public.setting_int('calls.window_after_min')) and k.status = 'confirmed'))
       or (c.group_session_id is not null and not exists (select 1 from public.group_sessions g where g.id = c.group_session_id
-            and g.status = 'scheduled' and now() < g.starts_at + make_interval(mins => g.duration_min) + interval '15 minutes')));
+            and g.status = 'scheduled' and now() < g.starts_at + make_interval(mins => g.duration_min + public.setting_int('calls.window_after_min')))));
   update public.call_participants p set status = 'left', left_at = coalesce(left_at, now())
     from public.calls c where c.id = p.call_id and c.status in ('ended','missed','declined','cancelled') and p.status in ('ringing','joined');
 end $$;
@@ -170,7 +264,7 @@ begin
   select * into k from public.consultations where id = p_consultation for update;
   if not found or me not in (k.user_id, k.scholar_id) then raise exception 'CALL_NOT_ALLOWED' using errcode = 'P0001'; end if;
   if not public.consultation_callable(k, coalesce(p_video, false)) then raise exception 'CALL_NOT_ALLOWED' using errcode = 'P0001'; end if;
-  if (select count(*) from public.calls where host_id = me and created_at > now() - interval '10 minutes') >= 6 then
+  if (select count(*) from public.calls where host_id = me and created_at > now() - interval '10 minutes') >= public.setting_int('calls.max_starts_per_10min') then
     raise exception 'RATE_LIMIT' using errcode = 'P0001';
   end if;
   other := case when me = k.user_id then k.scholar_id else k.user_id end;
@@ -224,15 +318,16 @@ end $$;
 -- ---------------------------------------------------------------------
 -- 4) group sessions and group calls
 -- ---------------------------------------------------------------------
-create or replace function public.group_session_create(p_title text, p_starts_at timestamptz, p_duration_min int, p_video boolean, p_capacity int) returns uuid
+create or replace function public.group_session_create(p_title text, p_starts_at timestamptz, p_duration_min int, p_capacity int) returns uuid
 language plpgsql security definer set search_path = public, pg_temp as $$
 declare sid uuid;
 begin
   if not public.group_host_ok() then raise exception 'FORBIDDEN' using errcode = 'P0001'; end if;
   if p_starts_at is null or p_starts_at < now() - interval '5 minutes' then raise exception 'BAD_TIME' using errcode = 'P0001'; end if;
   if public.contains_contact_info(coalesce(p_title, '')) then raise exception 'CONTACT_INFO' using errcode = 'P0001'; end if;
-  insert into public.group_sessions (host_id, title, video, starts_at, duration_min, capacity)
-    values (auth.uid(), btrim(p_title), coalesce(p_video, true), p_starts_at, p_duration_min, p_capacity) returning id into sid;
+  if p_capacity is null or p_capacity > public.setting_int('groups.max_capacity') then raise exception 'CAPACITY_TOO_LARGE' using errcode = 'P0001'; end if;
+  insert into public.group_sessions (host_id, title, starts_at, duration_min, capacity)
+    values (auth.uid(), btrim(p_title), p_starts_at, p_duration_min, p_capacity) returning id into sid;
   insert into public.group_session_members (session_id, user_id, status, responded_at) values (sid, auth.uid(), 'accepted', now());
   return sid;
 end $$;
@@ -255,7 +350,8 @@ begin
   select status into cur from public.group_session_members where session_id = p_session and user_id = k.user_id;
   if cur in ('invited','accepted') then return 'already'; end if;
   if cur = 'removed' then raise exception 'MEMBER_REMOVED' using errcode = 'P0001'; end if;
-  if (select count(*) from public.group_session_members where session_id = p_session and status in ('invited','accepted')) >= g.capacity then
+  if (select count(*) from public.group_session_members where session_id = p_session and status in ('invited','accepted'))
+       >= least(g.capacity, public.setting_int('groups.max_capacity')) then
     raise exception 'SESSION_FULL' using errcode = 'P0001';
   end if;
   if cur is null then
@@ -304,12 +400,12 @@ begin
   perform public.call_housekeeping();
   select * into g from public.group_sessions where id = p_session for update;
   if not found or g.host_id <> auth.uid() or g.status <> 'scheduled' or not public.group_host_ok()
-     or now() not between g.starts_at - interval '10 minutes' and g.starts_at + make_interval(mins => g.duration_min) then
+     or now() not between g.starts_at - make_interval(mins => public.setting_int('calls.window_before_min')) and g.starts_at + make_interval(mins => g.duration_min) then
     raise exception 'CALL_NOT_ALLOWED' using errcode = 'P0001';
   end if;
   select id into cid from public.calls where group_session_id = p_session and status in ('ringing','active');
   if cid is not null then return cid; end if;                     -- one live call per session
-  insert into public.calls (video, group_session_id, host_id, status, started_at) values (g.video, g.id, g.host_id, 'active', now()) returning id into cid;
+  insert into public.calls (video, group_session_id, host_id, status, started_at) values (false, g.id, g.host_id, 'active', now()) returning id into cid;
   insert into public.call_participants (call_id, user_id, role, status, joined_at)
     select cid, m.user_id, case when m.user_id = g.host_id then 'host' else 'guest' end,
            case when m.user_id = g.host_id then 'joined' else 'ringing' end, case when m.user_id = g.host_id then now() end
@@ -383,15 +479,36 @@ begin
       raise exception 'CALL_NOT_ALLOWED' using errcode = 'P0001';
     end if;
     select count(*) into n from public.call_participants where call_id = p_call and status = 'joined';
-    if p.status = 'ringing' and n >= (select capacity from public.group_sessions where id = c.group_session_id) then raise exception 'SESSION_FULL' using errcode = 'P0001'; end if;
+    if p.status = 'ringing' and n >= (select least(capacity, public.setting_int('groups.max_capacity')) from public.group_sessions where id = c.group_session_id) then
+      raise exception 'SESSION_FULL' using errcode = 'P0001';
+    end if;
   end if;
   if p.status = 'ringing' then update public.call_participants set status = 'joined', joined_at = now() where id = p.id; end if;
   if c.status = 'ringing' and c.group_session_id is not null then update public.calls set status = 'active', started_at = now() where id = c.id; end if;
-  -- the server turns this into a LiveKit token: this room only, short expiry, camera allowed only for video calls
-  -- and OFF at start in group calls ('camera_on_start'), identity derived from the participant id (not the user id)
+  -- the server turns this into a LiveKit token: this room only, short expiry, identity derived from the participant id
+  -- (not the user id). camera_allowed: ONLY one-to-one calls of a video booking - never in a group (voice only).
+  -- camera_on_start: the start state inside an allowed video call (setting calls.one_to_one_camera_on); never a permission.
   return jsonb_build_object('room', c.room_name, 'participant', p.id, 'video', c.video, 'host', p.role = 'host',
-                            'group', c.group_session_id is not null, 'camera_on_start', c.video and c.group_session_id is null,
+                            'group', c.group_session_id is not null,
+                            'camera_allowed', c.video and c.group_session_id is null,
+                            'camera_on_start', c.video and c.group_session_id is null and public.setting_bool('calls.one_to_one_camera_on'),
                             'name', coalesce(public.call_label(me), ''));
+end $$;
+
+-- ---------------------------------------------------------------------
+-- 5b) Jitsi fallback: the booking's existing Jitsi room, ONLY under exactly the same rules as a LiveKit call
+--     (participant of that booking, confirmed, in window, kind, verified payment, nobody suspended).
+--     Group sessions have no fallback. The server builds the link; it is used only when CALLS_FALLBACK=jitsi.
+-- ---------------------------------------------------------------------
+create or replace function public.call_fallback_room(p_consultation uuid, p_video boolean) returns text
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare me uuid := auth.uid(); k public.consultations;
+begin
+  select * into k from public.consultations where id = p_consultation;
+  if not found or me is null or me not in (k.user_id, k.scholar_id) or not public.consultation_callable(k, coalesce(p_video, false)) or k.meeting_room is null then
+    raise exception 'CALL_NOT_ALLOWED' using errcode = 'P0001';
+  end if;
+  return k.meeting_room;
 end $$;
 
 -- ---------------------------------------------------------------------
@@ -441,7 +558,7 @@ select c.id, c.video, c.group_session_id is not null as is_group, c.status, c.cr
 
 -- my group sessions (as host or invited member)
 create or replace view public.group_session_list as
-select g.id, g.title, g.video, g.starts_at, g.duration_min, g.capacity, g.status, (g.host_id = auth.uid()) as i_am_host,
+select g.id, g.title, g.starts_at, g.duration_min, g.capacity, g.status, (g.host_id = auth.uid()) as i_am_host,
        case when hs.id is not null then hp.display_name when hp.default_anonymous then null else hp.display_name end as host_name,
        m.status as my_status,
        (select count(*) from public.group_session_members x where x.session_id = g.id and x.status = 'accepted')::int as accepted_count
@@ -453,18 +570,21 @@ select g.id, g.title, g.video, g.starts_at, g.duration_min, g.capacity, g.status
 -- ---------------------------------------------------------------------
 -- PERMISSIONS
 -- ---------------------------------------------------------------------
-revoke all on public.calls, public.call_participants, public.group_sessions, public.group_session_members from public, anon, authenticated;
+revoke all on public.calls, public.call_participants, public.group_sessions, public.group_session_members, public.app_settings from public, anon, authenticated;
 revoke all on public.call_history, public.group_session_list from public, anon, authenticated;
 grant select on public.call_history, public.group_session_list to authenticated;
 revoke execute on function public.call_label(uuid), public.consultation_callable(public.consultations, boolean), public.call_housekeeping(),
-  public.group_host_ok() from public, anon, authenticated;
+  public.group_host_ok(), public.setting_spec(text), public.setting_valid(text, jsonb), public.setting_int(text), public.setting_bool(text),
+  public.app_settings_before_write() from public, anon, authenticated;
 revoke execute on function public.call_start(uuid, boolean), public.call_answer(uuid, boolean), public.call_hangup(uuid), public.call_join(uuid),
   public.call_incoming(), public.call_state(uuid), public.call_end_all(uuid), public.call_remove(uuid, uuid),
-  public.group_session_create(text, timestamptz, int, boolean, int), public.group_session_invite(uuid, uuid),
-  public.group_session_respond(uuid, boolean), public.group_session_remove(uuid, uuid), public.group_call_start(uuid) from public, anon;
+  public.group_session_create(text, timestamptz, int, int), public.group_session_invite(uuid, uuid),
+  public.group_session_respond(uuid, boolean), public.group_session_remove(uuid, uuid), public.group_call_start(uuid),
+  public.call_fallback_room(uuid, boolean), public.admin_get_settings(), public.admin_set_setting(text, jsonb) from public, anon;
 grant execute on function public.call_start(uuid, boolean), public.call_answer(uuid, boolean), public.call_hangup(uuid), public.call_join(uuid),
   public.call_incoming(), public.call_state(uuid), public.call_end_all(uuid), public.call_remove(uuid, uuid),
-  public.group_session_create(text, timestamptz, int, boolean, int), public.group_session_invite(uuid, uuid),
-  public.group_session_respond(uuid, boolean), public.group_session_remove(uuid, uuid), public.group_call_start(uuid) to authenticated;
+  public.group_session_create(text, timestamptz, int, int), public.group_session_invite(uuid, uuid),
+  public.group_session_respond(uuid, boolean), public.group_session_remove(uuid, uuid), public.group_call_start(uuid),
+  public.call_fallback_room(uuid, boolean), public.admin_get_settings(), public.admin_set_setting(text, jsonb) to authenticated;
 
 commit;

@@ -2,14 +2,10 @@
 // Run after tests/reset-db.sh:  PGHOST=... PGPORT=... PGUSER=postgres PGDATABASE=askdeen node --test tests/db6.test.mjs
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { sqlSync } from './lib/db.mjs';
 
 const U = { ana: 'dddddddd-0000-4000-8000-0000000000a1', ben: 'dddddddd-0000-4000-8000-0000000000b1', odd: 'dddddddd-0000-4000-8000-0000000000c1' };
-function run(script) {
-  const r = spawnSync('psql', ['-X', '-q', '-At', '-F', '\t', '-v', 'ON_ERROR_STOP=1', '-d', process.env.PGDATABASE || 'askdeen'], { input: script, encoding: 'utf8' });
-  if (r.status !== 0) throw new Error(r.stderr.trim());
-  return r.stdout.trim();
-}
+const run = script => sqlSync(script, { sep: '\t' });   // every query goes through the database guard (tests/lib/db-guard.sh)
 const root = q => run(q + ';');
 const pre = who => who === 'anon' ? 'set local role anon;'
   : `set local role authenticated; select set_config('request.jwt.claims', '{"sub":"${U[who]}","role":"authenticated"}', true) \\gset\n`;

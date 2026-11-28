@@ -23,34 +23,51 @@ jobs:
       - run: npm test
 
   database:
-    name: Database (schema, RLS, RPCs on real PostgreSQL)
+    name: Database (schema, RLS, RPCs, migrations, guard - disposable PostgreSQL only)
     runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_PASSWORD: postgres
+          POSTGRES_PASSWORD: postgres   # throw-away service container of this job only
         ports: ["5432:5432"]
         options: >-
           --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    # CI mode of the mandatory database guard (tests/lib/db-guard.sh): loopback service container, exact database
+    # alfrzo_ci_disposable_test with its marker. No secrets, no production URL, no Supabase host anywhere in this job.
     env:
-      PGHOST: localhost
+      ALFRZO_CI_TEST_DB: "1"
+      PGHOST: 127.0.0.1
       PGPORT: "5432"
       PGUSER: postgres
-      PGPASSWORD: postgres   # throw-away CI database only
-      PGDATABASE: askdeen
+      PGPASSWORD: postgres
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Guard must REFUSE a production-like configuration (this step passes only when the guard refuses)
+        run: |
+          if PGHOST=db.example.supabase.co bash tests/lib/db-guard.sh check; then echo "guard did not refuse"; exit 1; fi
+          if RENDER=true bash tests/lib/db-guard.sh check; then echo "guard did not refuse"; exit 1; fi
+          if ALFRZO_CI_TEST_DB= bash tests/lib/db-guard.sh check; then echo "guard did not refuse"; exit 1; fi
+      - name: Guard tests (G-1 ... G-21)
+        run: bash tests/run-db-tests.sh guard
       - name: Core schema tests
-        run: bash tests/reset-db.sh && node --test tests/db.test.mjs
+        run: bash tests/run-db-tests.sh db
       - name: Consultations / messages / reels tests
-        run: bash tests/reset-db.sh && node --test tests/db3.test.mjs
+        run: bash tests/run-db-tests.sh db3
       - name: Phase 1 fixes (refunds, cancellations, slots, reel views, counters)
-        run: bash tests/reset-db.sh && node --test tests/db4.test.mjs
+        run: bash tests/run-db-tests.sh db4
       - name: Premium refund correction (migration 007)
-        run: bash tests/reset-db.sh && node --test tests/db5.test.mjs
+        run: bash tests/run-db-tests.sh db5
       - name: Profile and settings (migration 008)
-        run: bash tests/reset-db.sh && node --test tests/db6.test.mjs
+        run: bash tests/run-db-tests.sh db6
+      - name: Calls - nine booking rules (migration 009)
+        run: bash tests/run-db-tests.sh db7
+      - name: Calls - settings, capacity, fallback, voice-only groups, camera (migration 009)
+        run: bash tests/run-db-tests.sh db8
+      - name: Contact-info rule identical in database and browser
+        run: bash tests/run-db-tests.sh contact
+      - name: Migration safety + health check (upgrade, repeat, order, rollback, rebuild)
+        run: bash tests/run-db-tests.sh migrations

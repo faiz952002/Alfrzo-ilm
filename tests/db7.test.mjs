@@ -3,7 +3,7 @@
 // Every function is called as the person would call it (role authenticated + their JWT claims), never as the owner.
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { sqlSync } from './lib/db.mjs';
 
 const U = {
   cli: 'e0000000-0000-4000-8000-000000000001', cli2: 'e0000000-0000-4000-8000-000000000002', cli3: 'e0000000-0000-4000-8000-000000000003',
@@ -11,11 +11,7 @@ const U = {
   unver: 'e0000000-0000-4000-8000-0000000000a3', admin: 'e0000000-0000-4000-8000-0000000000b1', named: 'e0000000-0000-4000-8000-000000000005',
 };
 const K = n => `f0000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
-function run(script) {
-  const r = spawnSync('psql', ['-X', '-q', '-At', '-F', '|', '-v', 'ON_ERROR_STOP=1', '-d', process.env.PGDATABASE || 'askdeen'], { input: script, encoding: 'utf8' });
-  if (r.status !== 0) throw new Error(r.stderr.trim());
-  return r.stdout.trim();
-}
+const run = script => sqlSync(script, { sep: '|' });   // every query goes through the database guard (tests/lib/db-guard.sh)
 const root = q => run(q + ';');
 const pre = who => who === 'anon' ? 'set local role anon;'
   : `set local role authenticated; select set_config('request.jwt.claims', '{"sub":"${U[who]}","role":"authenticated"}', true) \\gset\n`;
@@ -91,7 +87,7 @@ test('ringing, busy, answer, token gate, hang-up and history (with anonymity)', 
   assert.equal(as('stranger', `select call_answer('${c}', true)`), 'gone');
   assert.equal(as('sch', `select call_answer('${c}', true)`), 'joined');
   const j = JSON.parse(as('sch', `select call_join('${c}')`));
-  assert.equal(j.group, false); assert.equal(j.host, false); assert.equal(j.video, true); assert.equal(j.camera_on_start, true);
+  assert.equal(j.group, false); assert.equal(j.host, false); assert.equal(j.video, true); assert.equal(j.camera_allowed, true); assert.equal(j.camera_on_start, true);
   assert.match(j.room, /^c_[0-9a-f]{32}$/); assert.notEqual(j.participant, U.sch, 'media identity is not the user id');
   assert.equal(as('stranger', `select call_state('${c}')`), '', 'strangers see nothing');
   assert.equal(as('cli', `select call_hangup('${c}')`), 'ended');
@@ -126,15 +122,15 @@ test('rate limit: at most 6 calls in 10 minutes per caller', () => {
 // ---------------------------------------------------------------- groups -----------------------------------
 let G, GC;
 test('rule 6: only verified, non-suspended scholars and non-suspended admins create group sessions', () => {
-  fails(() => as('cli', `select group_session_create('Study circle', now(), 60, true, 5)`), /FORBIDDEN/);
-  fails(() => as('unver', `select group_session_create('Study circle', now(), 60, true, 5)`), /FORBIDDEN/);
-  fails(() => as('sch', `select group_session_create('Call me 9876543210', now(), 60, true, 5)`), /CONTACT_INFO/);
+  fails(() => as('cli', `select group_session_create('Study circle', now(), 60, 5)`), /FORBIDDEN/);
+  fails(() => as('unver', `select group_session_create('Study circle', now(), 60, 5)`), /FORBIDDEN/);
+  fails(() => as('sch', `select group_session_create('Call me 9876543210', now(), 60, 5)`), /CONTACT_INFO/);
   root(`update profiles set suspended = true where id in ('${U.sch2}','${U.admin}')`);
-  fails(() => as('sch2', `select group_session_create('Study circle', now(), 60, true, 5)`), /FORBIDDEN/);
-  fails(() => as('admin', `select group_session_create('Study circle', now(), 60, true, 5)`), /FORBIDDEN/);
+  fails(() => as('sch2', `select group_session_create('Study circle', now(), 60, 5)`), /FORBIDDEN/);
+  fails(() => as('admin', `select group_session_create('Study circle', now(), 60, 5)`), /FORBIDDEN/);
   root(`update profiles set suspended = false where id in ('${U.sch2}','${U.admin}')`);
-  assert.match(as('admin', `select group_session_create('Admin circle', now(), 60, false, 5)`), /^[0-9a-f-]{36}$/);
-  G = as('sch', `select group_session_create('Zakat Q&A', now(), 60, true, 3)`);
+  assert.match(as('admin', `select group_session_create('Admin circle', now(), 60, 5)`), /^[0-9a-f-]{36}$/);
+  G = as('sch', `select group_session_create('Zakat Q&A', now(), 60, 3)`);
   assert.match(G, /^[0-9a-f-]{36}$/);
 });
 
@@ -163,7 +159,7 @@ test('members must accept; the call joins only accepted members; late acceptance
   fails(() => as('stranger', `select call_join('${GC}')`), /CALL_NOT_ALLOWED/);
   assert.equal(as('cli2', `select group_session_respond('${G}', true)`), 'accepted');
   const j = JSON.parse(as('cli2', `select call_join('${GC}')`));
-  assert.equal(j.group, true); assert.equal(j.camera_on_start, false, 'camera OFF at start in group calls'); assert.equal(j.host, false);
+  assert.equal(j.group, true); assert.equal(j.camera_allowed, false, 'no camera in group calls'); assert.equal(j.camera_on_start, false); assert.equal(j.host, false);
   assert.equal(as('sch', `select group_call_start('${G}')`), GC, 'one live call per session');
   // decline the ring / leave, then come back while accepted
   assert.equal(as('cli2', `select call_hangup('${GC}')`), 'left');
@@ -200,17 +196,17 @@ test('host controls: remove (live calls only), end for all (group calls only), n
 });
 
 test('cancelled / ended / over sessions accept nothing; suspended host loses control', () => {
-  const S2 = as('sch', `select group_session_create('Second', now(), 60, true, 5)`);
+  const S2 = as('sch', `select group_session_create('Second', now(), 60, 5)`);
   as('sch', `select group_session_invite('${S2}', '${K(11)}')`);
   root(`update group_sessions set status='cancelled' where id='${S2}'`);
   assert.equal(as('cli3', `select group_session_respond('${S2}', true)`), 'gone');
   fails(() => as('sch', `select group_call_start('${S2}')`), /CALL_NOT_ALLOWED/);
   fails(() => as('sch', `select group_session_invite('${S2}', '${K(10)}')`), /FORBIDDEN/);
-  const S3 = as('sch', `select group_session_create('Third', now(), 15, true, 5)`);
+  const S3 = as('sch', `select group_session_create('Third', now(), 15, 5)`);
   as('sch', `select group_session_invite('${S3}', '${K(11)}')`);
   root(`update group_sessions set starts_at = now() - interval '1 hour' where id='${S3}'`);
   assert.equal(as('cli3', `select group_session_respond('${S3}', true)`), 'gone', 'session over');
-  const S4 = as('sch', `select group_session_create('Fourth', now(), 60, true, 5)`);
+  const S4 = as('sch', `select group_session_create('Fourth', now(), 60, 5)`);
   as('sch', `select group_session_invite('${S4}', '${K(11)}')`); as('cli3', `select group_session_respond('${S4}', true)`);
   const C4 = as('sch', `select group_call_start('${S4}')`);
   root(`update profiles set suspended = true where id='${U.sch}'`);
@@ -233,7 +229,7 @@ test('no direct table access; views only show my rows; internal helpers closed; 
   fails(() => as('cli', `insert into call_history(id) values (gen_random_uuid())`), /permission denied|cannot insert/);
   for (const f of ['call_label(uuid)', 'consultation_callable(public.consultations, boolean)', 'call_housekeeping()', 'group_host_ok()'])
     for (const r of ['anon', 'authenticated']) assert.equal(root(`select has_function_privilege('${r}', 'public.${f}', 'execute')`), 'f', `${r} ${f}`);
-  for (const f of ['call_start(uuid,boolean)', 'call_join(uuid)', 'call_incoming()', 'group_session_create(text,timestamptz,integer,boolean,integer)'])
+  for (const f of ['call_start(uuid,boolean)', 'call_join(uuid)', 'call_incoming()', 'group_session_create(text,timestamptz,integer,integer)'])
     assert.equal(root(`select has_function_privilege('anon', 'public.${f}', 'execute')`), 'f', `anon ${f}`);
   const loose = root(`select string_agg(p.proname, ',') from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public' and p.prosecdef and (p.proname like 'call\\_%' or p.proname like 'group\\_%' or p.proname = 'consultation_callable')

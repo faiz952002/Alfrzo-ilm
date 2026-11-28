@@ -2,27 +2,23 @@
 // It exists so the browser flows can run against real RLS. It is never used in production.
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 
-export const PG = { host: process.env.PGHOST || '/tmp/pgsock', port: process.env.PGPORT || '54329', db: process.env.PGDATABASE || 'askdeen' };
+import { sqlSync, guard } from '../lib/db.mjs';
+// The browser tests use the same guarded disposable test database as every other test (tests/lib/db-guard.sh).
+export const PG = { host: process.env.PGHOST, port: process.env.PGPORT, get db() { return guard('name'); } };
 const JWT_SECRET = 'test-secret-test-secret-test-secret-123456';
 const b64 = o => Buffer.from(typeof o === 'string' ? o : JSON.stringify(o)).toString('base64url');
 export const sign = claims => { const h = b64({ alg: 'HS256', typ: 'JWT' }), p = b64(claims); return `${h}.${p}.${crypto.createHmac('sha256', JWT_SECRET).update(h + '.' + p).digest('base64url')}`; };
 export const ANON = sign({ role: 'anon' }), SERVICE = sign({ role: 'service_role' });
 const lit = s => `'${String(s).replace(/'/g, "''")}'`;
 
-export function sql(q) {
-  const r = spawnSync('psql', ['-X', '-At', '-h', PG.host, '-p', PG.port, '-U', 'postgres', '-d', PG.db, '-v', 'ON_ERROR_STOP=1', '-c', q], { encoding: 'utf8' });
-  if (r.status !== 0) throw new Error(r.stderr.trim());
-  return r.stdout.trim();
-}
+export function sql(q) { return sqlSync(q + ';'); }
 
 // Runs SQL as a logged-in user so Row Level Security applies exactly as it does for the browser.
 function asUser(uid, q) {
   const full = `begin; set local role authenticated; select set_config('request.jwt.claims', ${lit(JSON.stringify({ sub: uid, role: 'authenticated' }))}, true); ${q}; commit;`;
-  const r = spawnSync('psql', ['-X', '-q', '-At', '-h', PG.host, '-p', PG.port, '-U', 'postgres', '-d', PG.db, '-v', 'ON_ERROR_STOP=1', '-c', full], { encoding: 'utf8' });
-  if (r.status !== 0) throw new Error(r.stderr.trim());
-  return r.stdout.trim().split('\n').pop();
+  return sqlSync(full).split('\n').pop();
 }
 const files = new Map();   // "bucket/path" -> { type, buf }
 const fileToken = key => crypto.createHmac('sha256', JWT_SECRET).update('file:' + key).digest('hex');
@@ -108,6 +104,7 @@ const listen = s => new Promise(r => s.listen(0, '127.0.0.1', () => r(s.address(
 export async function startStack({ appCfg = {} } = {}) {
   const pgrstPort = 3010 + Math.floor(Math.random() * 500);
   sql(`do $$ begin if not exists (select 1 from pg_roles where rolname='authenticator') then create role authenticator noinherit login; end if; end $$; grant anon, authenticated, service_role to authenticator;`);
+  guard('verify');   // PostgREST (the server under test) may only connect to the verified disposable test database
   const conf = `/tmp/pgrst-${pgrstPort}.conf`;
   (await import('node:fs')).writeFileSync(conf, `db-uri = "postgres://authenticator@/${PG.db}?host=${PG.host}&port=${PG.port}"\ndb-schemas = "public"\ndb-anon-role = "anon"\njwt-secret = "${JWT_SECRET}"\nserver-port = ${pgrstPort}\nserver-host = "127.0.0.1"\nlog-level = "error"\n`);
   const pgrst = spawn('runuser', ['-u', 'claude', '--', '/tmp/pgrst/postgrest', conf], { stdio: 'ignore' });

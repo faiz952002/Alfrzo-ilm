@@ -13,7 +13,8 @@ All database setup lives in `supabase/migrations/`. Run the files **in number or
 | 006 | `006_phase1_fixes.sql` | Phase 1 fixes (the SQL of `patch_004.sql`, unchanged) + exact permissions for what it adds | refuses: `ALREADY_APPLIED`; refuses `MISSING_PREVIOUS` if 005 is missing |
 | 007 | `007_premium_refund_correction.sql` | Premium refunds remove only the days the refunded payment bought; each refund applied once | refuses: `ALREADY_APPLIED`; refuses `MISSING_PREVIOUS` if 006 is missing |
 | 008 | `008_profile_settings.sql` | Profile photo (private `avatars` bucket), consultation-notification preference, display-name check on change. Additive only | refuses: `ALREADY_APPLIED`; refuses `MISSING_PREVIOUS` if 007 is missing |
-| – | `../DATABASE_HEALTH_CHECK.sql` | **Read-only.** 21 checks for a project with **001–008**; every row must be `true` | always safe |
+| 009 | `009_calls.sql` | **DRAFT – not approved for production.** In-app calls (booking-restricted), group sessions (voice only), app settings with fixed bounds, Jitsi fallback rule | refuses: `ALREADY_APPLIED`; refuses `MISSING_PREVIOUS` if 008 is missing |
+| – | `../DATABASE_HEALTH_CHECK.sql` | **Read-only.** 21 checks for a project with **001–009**; every row must be `true` | always safe |
 
 ## Relation to the old files
 
@@ -93,14 +94,20 @@ The server (`server/payments.js`) passes Razorpay's refund id and amount from th
 * Nothing is removed; payments, refunds and the RLS rules of existing tables are not touched.
 * The app works on a database **without** 008: the photo option and the consultation switch are simply not shown.
 
-## Health check before 006 / 007 / 008
+## Health check before 006 / 007 / 008 / 009
+
+The health-check file always describes the newest migration. On a project that has not run the newest file yet, the
+rows of that file fail and nothing else. Migration history is never edited: a mistake in an applied file is fixed with a
+new forward migration, never by changing or deleting the old one.
+
 
 | Database state | Health check | Failing rows |
 |---|---|---|
 | 001–005 (production before this release) | **11 of 20** | 1, 2, 3, 4, 5, 9, 12, 13, 16 |
 | 001–006 | **16 of 20** | 1, 3, 5, 16 (the 007 items) |
 | 001–007 (production after 007) | **16 of 21** | 4, 8, 9, 16, 21 (the 008 items) |
-| 001–008 | **21 of 21** | none |
+| 001–008 (production today) | **13 of 21** with the 009 health check (21 of 21 with the 008 version) | 1, 2, 3, 4, 5, 9, 13, 16 – only the 009 items |
+| 001–009 | **21 of 21** | none |
 
 ## Tested (008)
 

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Blocking stand-in, first on PATH during test runs: database tools may only be used through tests/lib/db-guard.sh.
+echo "BLOCKED: '$(basename "$0")' may not be run directly in tests. Use tests/lib/db-guard.sh (see docs/TESTING_GUIDE.md)." >&2
+exit 97

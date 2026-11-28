@@ -2,14 +2,10 @@
 // Run after tests/reset-db.sh:  PGHOST=... PGPORT=... PGUSER=postgres PGDATABASE=askdeen node --test tests/db3.test.mjs
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { sqlSync } from './lib/db.mjs';
 
 const U = { admin: 'aaaaaaaa-0000-4000-8000-000000000001', sch: 'bbbbbbbb-0000-4000-8000-000000000001', sch2: 'bbbbbbbb-0000-4000-8000-000000000002', amy: 'cccccccc-0000-4000-8000-000000000001', ben: 'cccccccc-0000-4000-8000-000000000002' };
-function run(script) {
-  const r = spawnSync('psql', ['-X', '-q', '-At', '-F', '\t', '-v', 'ON_ERROR_STOP=1', '-d', process.env.PGDATABASE || 'askdeen'], { input: script, encoding: 'utf8' });
-  if (r.status !== 0) throw new Error(r.stderr.trim());
-  return r.stdout.trim();
-}
+const run = script => sqlSync(script, { sep: '\t' });   // every query goes through the database guard (tests/lib/db-guard.sh)
 const root = q => run(q + ';');
 const pre = who => who === 'anon' ? 'set local role anon;' : who === 'service' ? 'set local role service_role;'
   : `set local role authenticated; select set_config('request.jwt.claims', '{"sub":"${U[who]}","role":"authenticated"}', true) \\gset\n`;

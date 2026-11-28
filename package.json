@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node server/server.js",
     "test": "node --test tests/server.test.mjs",
-    "test:db": "node --test --test-concurrency=1 tests/db.test.mjs tests/db3.test.mjs tests/db4.test.mjs tests/db5.test.mjs tests/db6.test.mjs",
-    "test:e2e": "node --test tests/e2e/flows.test.mjs"
+    "test:db": "bash tests/run-db-tests.sh db db3 db4 db5 db6 db7 db8 contact guard migrations",
+    "test:e2e": "bash tests/run-db-tests.sh e2e"
   }
 }

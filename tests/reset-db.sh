@@ -1,24 +1,33 @@
 #!/usr/bin/env bash
-# Rebuild the throw-away test database the way production is built: Supabase stand-in + supabase/migrations/001…
+# Rebuild the disposable test database the way production is built: Supabase stand-in + supabase/migrations/001…
 # (with Supabase's default privileges for new objects). LEGACY=1 builds it from the old schema.sql + patch files instead.
+# Everything goes through the mandatory database guard (tests/lib/db-guard.sh): it refuses unless this is the
+# exact disposable local / CI test database. Any failure stops the script with a non-zero exit code.
 set -euo pipefail
-export PGHOST=${PGHOST:-/tmp} PGPORT=${PGPORT:-54329} PGUSER=${PGUSER:-postgres}
-DB=${PGDATABASE:-askdeen}
 cd "$(dirname "$0")/.."
-dropdb --if-exists "$DB"; createdb "$DB"
-P="psql -d $DB -v ON_ERROR_STOP=1 -q"
-$P -f tests/supabase_shim.sql
+G="bash tests/lib/db-guard.sh"
+KEY="${1:-main}"
+
+apply() {   # apply one SQL file; show its output only when it fails
+  local f="$1" out
+  if ! out="$($G run "$KEY" -q < "$f" 2>&1)"; then
+    echo "FAILED: $f" >&2; echo "$out" | grep -v '^NOTICE' >&2; exit 1
+  fi
+}
+
+$G reset "$KEY" >/dev/null
+apply tests/supabase_shim.sql
 if [ "${LEGACY:-0}" = "1" ]; then
-  $P -f supabase/schema.sql 2>&1 | grep -v NOTICE || true
-  for f in supabase/patch_*.sql; do $P -f "$f" 2>&1 | grep -v NOTICE || true; done
-  echo "db ready (legacy files): $DB"
+  apply supabase/schema.sql
+  for f in supabase/patch_*.sql; do apply "$f"; done
+  echo "db ready (legacy files): $($G name "$KEY")"
 else
-  $P -c "alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
-         alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
-         alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;"
+  printf '%s\n' "alter default privileges in schema public grant all on tables to anon, authenticated, service_role;" \
+    "alter default privileges in schema public grant all on functions to anon, authenticated, service_role;" \
+    "alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;" | $G run "$KEY" -q
   for f in supabase/migrations/0[0-9][0-9]_*.sql; do
     case "$f" in *000_preflight_check.sql) continue;; esac
-    $P -f "$f" 2>&1 | grep -v NOTICE || true
+    apply "$f"
   done
-  echo "db ready (migrations): $DB"
+  echo "db ready (migrations): $($G name "$KEY")"
 fi

@@ -3,17 +3,13 @@
 // Payment functions are called the way the server calls them (service role); clients are checked to be refused.
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { sqlSync } from './lib/db.mjs';
 
 const U = { admin: 'aaaaaaaa-0000-4000-8000-0000000000a1', sch: 'bbbbbbbb-0000-4000-8000-0000000000b1',
   p1: 'cccccccc-0000-4000-8000-0000000000c1', p2: 'cccccccc-0000-4000-8000-0000000000c2', p3: 'cccccccc-0000-4000-8000-0000000000c3',
   p4: 'cccccccc-0000-4000-8000-0000000000c4', p5: 'cccccccc-0000-4000-8000-0000000000c5', p6: 'cccccccc-0000-4000-8000-0000000000c6',
   p7: 'cccccccc-0000-4000-8000-0000000000c7', p8: 'cccccccc-0000-4000-8000-0000000000c8', eve: 'cccccccc-0000-4000-8000-0000000000e1' };
-function run(script) {
-  const r = spawnSync('psql', ['-X', '-q', '-At', '-F', '\t', '-v', 'ON_ERROR_STOP=1', '-d', process.env.PGDATABASE || 'askdeen'], { input: script, encoding: 'utf8' });
-  if (r.status !== 0) throw new Error(r.stderr.trim());
-  return r.stdout.trim();
-}
+const run = script => sqlSync(script, { sep: '\t' });   // every query goes through the database guard (tests/lib/db-guard.sh)
 const root = q => run(q + ';');
 const pre = who => who === 'anon' ? 'set local role anon;' : who === 'service' ? 'set local role service_role;'
   : `set local role authenticated; select set_config('request.jwt.claims', '{"sub":"${U[who]}","role":"authenticated"}', true) \\gset\n`;
