@@ -13,6 +13,8 @@
 #   bash tests/lib/db-guard.sh drop    <key>         drop the allowlisted database (marker verified first)
 #   bash tests/lib/db-guard.sh reset   <key>         drop + create
 #   bash tests/lib/db-guard.sh name    <key>         print the allowlisted database name
+#   bash tests/lib/db-guard.sh postgrest <key> <port>  start PostgREST (browser tests, local mode only) on the verified
+#                                                     database; JWT test secret on stdin; runs until stopped
 #
 # Modes (exactly one):
 #   local: ALFRZO_TEST_DB=1      not in CI; PGHOST = Unix-socket directory or loopback
@@ -89,6 +91,8 @@ g_check_env() {
     if [ -n "${!n:-}" ]; then die 76 "secret variable $n is set"; fi
   done
   if env | grep -qiE 'sb_secret_|rzp_live_|c2VydmljZV9yb2xl|supabase\.co'; then die 76 "a variable contains a production key or Supabase host"; fi
+  # PostgREST must never take its settings (database URI, secret ...) from the environment
+  if env | grep -qE '^PGRST_[A-Z_]*='; then die 72 "PGRST_* variables are set (PostgREST settings come from the guard only)"; fi
   # service configuration and alternate connection settings
   if [ -n "${PGSERVICE:-}" ] || [ -n "${PGSERVICEFILE:-}" ]; then die 75 "PGSERVICE / PGSERVICEFILE must not be set"; fi
   if [ -n "${PGHOSTADDR:-}" ] && ! is_loopback "$PGHOSTADDR"; then die 75 "PGHOSTADDR is not loopback"; fi
@@ -127,6 +131,15 @@ g_bin() {
   done
   die 70 "$tool not found"
 }
+# PostgREST binary: first on PATH (never the shim directory), else the local test install; empty if none (no exit)
+g_find_postgrest() {
+  local d; local IFS=:
+  for d in $PATH; do
+    if [ -n "$d" ] && [ -x "$d/postgrest" ] && [ "$(cd "$d" 2>/dev/null && pwd -P || echo)" != "$(cd "$G_SHIM_DIR" && pwd -P)" ]; then echo "$d/postgrest"; return 0; fi
+  done
+  if [ -x /tmp/pgrst/postgrest ]; then echo /tmp/pgrst/postgrest; fi
+  return 0
+}
 G_EMPTY_CONF="$(mktemp -d)"; trap 'rm -rf "$G_EMPTY_CONF"' EXIT
 # a clean environment: only what the connection needs; no PGSERVICE, PGSERVICEFILE, PGHOSTADDR, PGDATABASE, PGOPTIONS ...
 g_exec() {
@@ -140,14 +153,17 @@ g_conninfo() { echo "host=$PGHOST port=$PGPORT dbname=$1 sslmode=disable connect
 # Reads the database name, its comment (marker) and the real server address; compares them exactly here.
 # On any mismatch the psql process has already ended (connection closed) and nothing else is run.
 g_verify_db() {   # $1 = exact database name, $2 = expected marker ('' = maintenance database: marker not required)
-  local db="$1" want="$2" out name marker addr sep=$'\x1f'
+  local db="$1" want="$2" out name marker addr enc sep=$'\x1f'
   out="$(printf '%s\n' "begin transaction read only;" \
-     "select current_database(), coalesce(shobj_description(d.oid, 'pg_database'), ''), coalesce(host(inet_server_addr()), '') from pg_database d where d.datname = current_database();" \
+     "select current_database(), coalesce(shobj_description(d.oid, 'pg_database'), ''), coalesce(host(inet_server_addr()), ''), pg_encoding_to_char(d.encoding) from pg_database d where d.datname = current_database();" \
      "rollback;" | g_exec "$(g_bin psql)" -X -q -t -A -F "$sep" -v ON_ERROR_STOP=1 -d "$(g_conninfo "$db")" 2>/dev/null)" \
      || die 78 "verification query failed on $db"
-  IFS="$sep" read -r name marker addr <<<"$out" || true
+  IFS="$sep" read -r name marker addr enc <<<"$out" || true
   [ "$name" = "$db" ] || die 78 "connected database is not $db"
-  if [ -n "$want" ]; then [ "$marker" = "$want" ] || die 78 "database $db has no valid disposable-test marker for this mode"; fi
+  if [ -n "$want" ]; then
+    [ "$marker" = "$want" ] || die 78 "database $db has no valid disposable-test marker for this mode"
+    [ "$enc" = UTF8 ] || die 78 "database $db is not UTF8 (production is UTF8; results would differ)"
+  fi
   if [ -z "$addr" ]; then
     { [ "$G_MODE" = local ] && [[ "$PGHOST" == /* ]]; } || die 78 "server address is not loopback"
   else
@@ -202,7 +218,7 @@ main() {
     create)
       [ $# -eq 0 ] || die 77 "create takes no extra arguments"
       g_verify_db postgres ''
-      printf '%s\n' "create database \"$db\";" "comment on database \"$db\" is '$(g_marker)';" \
+      printf '%s\n' "create database \"$db\" with template template0 encoding 'UTF8';" "comment on database \"$db\" is '$(g_marker)';" \
         | g_exec "$(g_bin psql)" -X -q -v ON_ERROR_STOP=1 -d "$(g_conninfo postgres)"
       g_verify_db "$db" "$(g_marker)" ;;
     drop)
@@ -213,6 +229,35 @@ main() {
         printf '%s\n' "drop database \"$db\" with (force);" | g_exec "$(g_bin psql)" -X -q -v ON_ERROR_STOP=1 -d "$(g_conninfo postgres)"
       fi ;;
     reset) "$0" drop "$key"; "$0" create "$key" ;;
+    postgrest)
+      [ "$G_MODE" = local ] || die 70 "PostgREST (browser tests) runs in local mode only"
+      [ $# -eq 1 ] && [[ "$1" =~ ^[0-9]{4,5}$ ]] && [ "$1" -ge 1024 ] && [ "$1" -le 65535 ] || die 77 "postgrest needs one port number (1024-65535)"
+      local port="$1" secret bin runas="${ALFRZO_PGRST_RUNAS:-}" cdir uri
+      IFS= read -r secret || true
+      [[ "$secret" =~ ^[A-Za-z0-9_-]{32,128}$ ]] || die 77 "the JWT test secret (stdin) must be 32-128 letters, digits, - or _"
+      if [ -n "${ALFRZO_POSTGREST_BIN:-}" ]; then bin="$ALFRZO_POSTGREST_BIN"; else bin="$(g_find_postgrest)"; fi
+      [[ "$bin" == /* ]] && [ -x "$bin" ] || die 70 "PostgREST binary not found"
+      if [ -n "$runas" ]; then
+        [[ "$runas" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] && [ "$runas" != root ] && id -u "$runas" >/dev/null 2>&1 || die 77 "ALFRZO_PGRST_RUNAS must be an existing non-root user"
+        G_RUNUSER="$(command -v runuser || true)"; [[ "$G_RUNUSER" == /* ]] || die 70 "runuser not found"
+      fi
+      g_verify_db "$db" "$(g_marker)"
+      if [[ "$PGHOST" == /* ]]; then uri="postgres://authenticator@/$db?host=$PGHOST&port=$PGPORT"; else uri="postgres://authenticator@$PGHOST:$PGPORT/$db"; fi
+      cdir="$(mktemp -d)"; chmod 700 "$cdir"
+      printf '%s\n' "db-uri = \"$uri\"" 'db-schemas = "public"' 'db-anon-role = "anon"' "jwt-secret = \"$secret\"" \
+        "server-port = $port" 'server-host = "127.0.0.1"' 'log-level = "error"' > "$cdir/postgrest.conf"
+      chmod 600 "$cdir/postgrest.conf"
+      if [ -n "$runas" ]; then chown -R "$runas" "$cdir"; fi
+      # clean environment: no PG* / PGRST_* / DATABASE_URL ... reaches PostgREST; its only settings are the file above
+      if [ -n "$runas" ]; then
+        env -i PATH="/usr/bin:/bin" HOME=/tmp LANG=C.UTF-8 PGSYSCONFDIR="$G_EMPTY_CONF" "$G_RUNUSER" -u "$runas" -- "$bin" "$cdir/postgrest.conf" </dev/null &
+      else
+        env -i PATH="/usr/bin:/bin" HOME=/tmp LANG=C.UTF-8 PGSYSCONFDIR="$G_EMPTY_CONF" "$bin" "$cdir/postgrest.conf" </dev/null &
+      fi
+      G_CHILD=$!; G_CDIR="$cdir"   # globals: the EXIT trap runs after this function has returned
+      trap 'kill "${G_CHILD:-}" 2>/dev/null || true; rm -rf "${G_CDIR:-}" "$G_EMPTY_CONF"' EXIT
+      trap 'exit 0' TERM INT
+      wait "$G_CHILD" ;;
     *) die 77 "unknown command '$cmd'" ;;
   esac
 }

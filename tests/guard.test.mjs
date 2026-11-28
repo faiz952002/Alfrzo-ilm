@@ -14,7 +14,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const GUARD = path.join(ROOT, 'tests/lib/db-guard.sh');
 const SHIMS = path.join(ROOT, 'tests/lib/shims');
 const SEP = '\x1f';
-let FAKE, LOG;
+let FAKE, LOG, PGRST_LOG;
 
 before(() => {
   FAKE = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-fake-'));
@@ -22,6 +22,11 @@ before(() => {
   // logging fake: records the tool, its arguments and its stdin; prints FAKE_PSQL_OUT (the "verification row")
   const fake = `#!/usr/bin/env bash\n{ echo "CALL $(basename "$0") $*"; cat; echo; echo "END"; } >> "$FAKE_PSQL_LOG"\nprintf '%s\\n' "\${FAKE_PSQL_OUT:-}"\n`;
   for (const t of ['psql', 'pg_dump']) { fs.writeFileSync(path.join(FAKE, t), fake); fs.chmodSync(path.join(FAKE, t), 0o755); }
+  // fake PostgREST: records its arguments, its whole environment and the configuration it was given, then exits.
+  // (its log path is written into the script, because the guard gives PostgREST an empty environment)
+  PGRST_LOG = path.join(FAKE, 'pgrst.log');
+  fs.writeFileSync(path.join(FAKE, 'postgrest'), `#!/usr/bin/env bash\n{ echo "START $*"; echo "--- ENV"; env -0 | tr '\\0' '\\n' | cut -d= -f1; echo "--- CONF"; cat "$1"; echo "--- END"; } >> '${PGRST_LOG}'\n`);
+  fs.chmodSync(path.join(FAKE, 'postgrest'), 0o755);
 });
 after(() => fs.rmSync(FAKE, { recursive: true, force: true }));
 
@@ -125,17 +130,18 @@ const verifyRefused = (env, out, what) => {
 };
 test('G-11 / G-12 / G-13: missing or wrong marker, wrong database name, non-local server address -> 78, one read-only query', () => {
   const L = 'ALFRZO_DISPOSABLE_TEST v1 (local)', C = 'ALFRZO_DISPOSABLE_TEST v1 (ci)';
-  verifyRefused(baseLocal(), ['alfrzo_disposable_test', '', ''].join(SEP), 'no marker');
-  verifyRefused(baseLocal(), ['alfrzo_disposable_test', C, ''].join(SEP), 'CI marker in local mode');
-  verifyRefused(baseCI(), ['alfrzo_ci_disposable_test', L, '127.0.0.1'].join(SEP), 'local marker in CI mode');
-  verifyRefused(baseLocal(), ['production', L, ''].join(SEP), 'different database name');
-  verifyRefused(baseLocal(), ['alfrzo_disposable_test', L, '10.0.0.9'].join(SEP), 'remote server address');
-  verifyRefused(baseCI(), ['alfrzo_ci_disposable_test', C, ''].join(SEP), 'socket address in CI mode');
+  verifyRefused(baseLocal(), ['alfrzo_disposable_test', '', '', 'UTF8'].join(SEP), 'no marker');
+  verifyRefused(baseLocal(), ['alfrzo_disposable_test', C, '', 'UTF8'].join(SEP), 'CI marker in local mode');
+  verifyRefused(baseCI(), ['alfrzo_ci_disposable_test', L, '127.0.0.1', 'UTF8'].join(SEP), 'local marker in CI mode');
+  verifyRefused(baseLocal(), ['production', L, '', 'UTF8'].join(SEP), 'different database name');
+  verifyRefused(baseLocal(), ['alfrzo_disposable_test', L, '10.0.0.9', 'UTF8'].join(SEP), 'remote server address');
+  verifyRefused(baseCI(), ['alfrzo_ci_disposable_test', C, '', 'UTF8'].join(SEP), 'socket address in CI mode');
   verifyRefused(baseLocal(), '', 'empty answer');
+  verifyRefused(baseLocal(), ['alfrzo_disposable_test', L, '', 'SQL_ASCII'].join(SEP), 'database not UTF8');
   // and the accepted case with the fake: verification + the caller's SQL = 2 commands
-  const ok = g(fakeEnv(baseLocal(), ['alfrzo_disposable_test', L, ''].join(SEP)), ['run', 'main'], 'select 42;');
+  const ok = g(fakeEnv(baseLocal(), ['alfrzo_disposable_test', L, '', 'UTF8'].join(SEP)), ['run', 'main'], 'select 42;');
   assert.equal(ok.status, 0, ok.stderr); assert.equal(calls().length, 2);
-  const okCI = g(fakeEnv(baseCI(), ['alfrzo_ci_disposable_test', C, '127.0.0.1'].join(SEP)), ['run', 'main'], 'select 42;');
+  const okCI = g(fakeEnv(baseCI(), ['alfrzo_ci_disposable_test', C, '127.0.0.1', 'UTF8'].join(SEP)), ['run', 'main'], 'select 42;');
   assert.equal(okCI.status, 0, okCI.stderr);
 });
 
@@ -156,6 +162,7 @@ test('G-21 / G-17: the approved configuration works; create sets the marker; dro
 });
 
 test('G-14 / G-16: a real database without the marker: the caller\'s SQL never runs and it cannot be dropped', () => {
+  assert.equal(real(['reset', 'main']).status, 0, 'the verified main test database is needed to change the probe\'s marker');   // CI runs this first, before any other test created main
   assert.equal(real(['reset', 'probe']).status, 0);
   const name = real(['name', 'probe']).stdout.trim();
   assert.equal(real(['run', 'main', '-q'], `comment on database ${name} is null;`).status, 0);   // remove the marker (from the verified main database)
@@ -183,7 +190,7 @@ test('G-18: during test runs psql / createdb / dropdb / pg_dump cannot be called
   }
 });
 
-test('G-19: no test, tool, server or workflow file runs a database tool except through the guard', () => {
+test('G-19: no test, tool, server or workflow file runs a database tool or PostgREST except through the guard', () => {
   const files = [];
   const walk = d => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) { if (!['node_modules', '.git'].includes(e.name)) walk(p); } else files.push(p); } };
   for (const d of ['tests', 'tools', 'server', '.github']) if (fs.existsSync(path.join(ROOT, d))) walk(path.join(ROOT, d));
@@ -192,13 +199,14 @@ test('G-19: no test, tool, server or workflow file runs a database tool except t
   const TOOL = '(psql|createdb|dropdb|pg_dump|pg_restore|pg_dumpall)';
   const jsRe = new RegExp(`(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)\\s*\\(\\s*['"\`][^'"\`]*\\b${TOOL}\\b`);
   const shRe = new RegExp(`(^|[\\s;|&(\`$])(\\/[\\w./-]*\\/)?${TOOL}(\\s|$)`);
+  const pgrstRe = /((spawn|spawnSync|exec|execSync|execFile|execFileSync)\s*\(\s*['"`][^'"`]*postgrest)|(['"`][^'"`\s]*\/postgrest['"`])|(runuser[^\n]*postgrest)/;
   const hits = [];
   for (const f of files) {
     if (allowed.has(path.resolve(f)) || f.startsWith(SHIMS) || /\.(md|sql|png|jpg|webp|json)$/.test(f) && !f.endsWith('package.json')) continue;
     const lines = fs.readFileSync(f, 'utf8').split('\n');
     lines.forEach((l, i) => {
       const code = l.replace(/^\s*(#|\/\/).*$/, '');
-      if (jsRe.test(code) || (/\.(sh|ya?ml|json)$/.test(f) && shRe.test(code))) hits.push(`${path.relative(ROOT, f)}:${i + 1}: ${l.trim()}`);
+      if (jsRe.test(code) || pgrstRe.test(code) || (/\.(sh|ya?ml|json)$/.test(f) && shRe.test(code))) hits.push(`${path.relative(ROOT, f)}:${i + 1}: ${l.trim()}`);
     });
   }
   assert.deepEqual(hits, [], 'direct database tool calls found');
@@ -210,4 +218,66 @@ test('G-20: every refusal is a non-zero exit (what CI relies on)', () => {
   const runner = spawnSync('bash', [path.join(ROOT, 'tests/run-db-tests.sh'), 'db'], { env: { ...baseLocal(), PGHOST: 'db.x.supabase.co' }, encoding: 'utf8' });
   assert.notEqual(runner.status, 0, 'the whole runner stops with a non-zero exit');
   assert.match(runner.stderr, /GUARD REFUSED/);
+});
+
+// ---------------------------------------------------------------- G-22 ... G-24: PostgREST only through the guard
+const SECRET = 'test-secret-test-secret-test-secret-123456';
+const VERIFIED = ['alfrzo_disposable_test', 'ALFRZO_DISPOSABLE_TEST v1 (local)', '', 'UTF8'].join(SEP);
+const pgrstEnv = (env, out = VERIFIED) => ({ ...fakeEnv(env, out), ALFRZO_POSTGREST_BIN: path.join(FAKE, 'postgrest') });
+const startPgrst = (env, args = ['postgrest', 'main', '3456'], secret = SECRET) => { fs.rmSync(PGRST_LOG, { force: true }); return g(env, args, secret + '\n'); };
+const starts = () => (fs.existsSync(PGRST_LOG) ? fs.readFileSync(PGRST_LOG, 'utf8').split('\n').filter(l => l.startsWith('START ')).length : 0);
+const noStart = (env, code, what, args, secret) => { const r = startPgrst(env, args, secret); refused(r, code, what); assert.equal(starts(), 0, `${what}: PostgREST must not start`); };
+
+test('G-22: PostgREST gets exactly the verified database URI, a clean environment, and its config is removed afterwards', () => {
+  const r = startPgrst(pgrstEnv({ ...baseLocal(), PGOPTIONS: '-c search_path=evil', PGDATABASE: 'alfrzo_disposable_test', EXTRA_TOKEN: 'x' }));
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(starts(), 1);
+  const log = fs.readFileSync(PGRST_LOG, 'utf8');
+  const confPath = log.match(/^START (\S+)/m)[1];
+  const env = log.split('--- ENV\n')[1].split('--- CONF')[0].trim().split('\n');
+  const conf = log.split('--- CONF\n')[1].split('--- END')[0];
+  assert.match(conf, new RegExp(`^db-uri = "postgres://authenticator@/alfrzo_disposable_test\\?host=${SOCK.replace(/[/.]/g, '\\$&')}&port=54329"$`, 'm'));
+  assert.match(conf, /^server-host = "127\.0\.0\.1"$/m); assert.match(conf, /^server-port = 3456$/m); assert.match(conf, /^db-anon-role = "anon"$/m);
+  assert.equal((conf.match(/db-uri/g) || []).length, 1);
+  const leaked = env.filter(k => /^(PG(?!SYSCONFDIR$)|PGRST_|DATABASE_URL|DIRECT_URL|SUPABASE|EXTRA_TOKEN|ALFRZO_|FAKE_|GITHUB|RENDER)/.test(k));
+  assert.deepEqual(leaked, [], 'nothing from the caller\'s environment reaches PostgREST');
+  assert.ok(!fs.existsSync(confPath), 'config file removed after PostgREST stopped');
+});
+
+test('G-23: PostgREST does not start on any unsafe configuration', () => {
+  noStart(pgrstEnv({ ...baseLocal(), PGRST_DB_URI: 'postgres://u@db.abcdefgh.supabase.co:5432/postgres' }), 76, 'inherited production PGRST_DB_URI');
+  noStart(pgrstEnv({ ...baseLocal(), PGRST_DB_URI: 'postgres://authenticator@/alfrzo_disposable_test' }), 72, 'any inherited PGRST_DB_URI');
+  noStart(pgrstEnv({ ...baseLocal(), PGRST_JWT_SECRET: 'x'.repeat(40) }), 72, 'inherited PGRST_JWT_SECRET');
+  noStart(pgrstEnv({ ...baseLocal(), DATABASE_URL: 'postgres://u@prod.example.org/db' }), 72, 'production DATABASE_URL');
+  noStart(pgrstEnv({ ...baseLocal(), SUPABASE_URL: 'https://abcdefgh.supabase.co' }), 76, 'production SUPABASE_URL');
+  noStart(pgrstEnv({ ...baseLocal(), PGHOST: '10.0.0.7' }), 72, 'remote PGHOST');
+  noStart(pgrstEnv({ ...baseLocal(), RENDER: 'true' }), 71, 'Render');
+  noStart(pgrstEnv(baseCI(), ['alfrzo_ci_disposable_test', 'ALFRZO_DISPOSABLE_TEST v1 (ci)', '127.0.0.1', 'UTF8'].join(SEP)), 70, 'CI mode');
+  noStart(pgrstEnv(baseLocal()), 73, 'key not on the allowlist', ['postgrest', 'askdeen', '3456']);
+  for (const p of ['80', 'abc', '70000']) noStart(pgrstEnv(baseLocal()), 77, `port ${p}`, ['postgrest', 'main', p]);
+  noStart(pgrstEnv(baseLocal()), 77, 'no port', ['postgrest', 'main']);
+  noStart(pgrstEnv(baseLocal()), 77, 'extra argument', ['postgrest', 'main', '3456', '--db-uri=x']);
+  noStart(pgrstEnv(baseLocal()), 77, 'short secret', undefined, 'short');
+  noStart(pgrstEnv(baseLocal()), 77, 'secret with quotes', undefined, 'a"b'.padEnd(40, 'x'));
+  noStart(pgrstEnv({ ...baseLocal(), ALFRZO_PGRST_RUNAS: 'root' }), 77, 'run as root');
+  noStart(pgrstEnv(baseLocal(), ['alfrzo_disposable_test', '', '', 'UTF8'].join(SEP)), 78, 'database without marker');
+  noStart(pgrstEnv(baseLocal(), ['production', 'ALFRZO_DISPOSABLE_TEST v1 (local)', '', 'UTF8'].join(SEP)), 78, 'wrong database');
+});
+
+test('G-24: real PostgREST started through the guard serves the disposable database (local) / is refused in CI mode', async () => {
+  if (process.env.ALFRZO_CI_TEST_DB === '1') {   // browser tests (and PostgREST) are not part of CI: the guard refuses there
+    const r = spawnSync('bash', [GUARD, 'postgrest', 'main', '3456'], { env: realEnv(), input: SECRET + '\n', encoding: 'utf8' });
+    assert.equal(r.status, 70); return;
+  }
+  // a full test schema on the main disposable database (an earlier test may have left it empty) - through the guard
+  const rebuilt = spawnSync('bash', [path.join(ROOT, 'tests/reset-db.sh'), 'main'], { env: realEnv(), encoding: 'utf8' });
+  assert.equal(rebuilt.status, 0, rebuilt.stderr);
+  assert.equal(real(['run', 'main', '-q'], "do $$ begin if not exists (select 1 from pg_roles where rolname='authenticator') then create role authenticator noinherit login; end if; end $$; grant anon, authenticated, service_role to authenticator;").status, 0);
+  const port = 4100 + Math.floor(Math.random() * 400);
+  const p = (await import('node:child_process')).spawn('bash', [GUARD, 'postgrest', 'main', String(port)], { detached: true, stdio: ['pipe', 'ignore', 'pipe'], env: { ...realEnv(), ALFRZO_PGRST_RUNAS: 'claude' } });
+  p.stdin.end(SECRET + '\n');
+  let status = 0;
+  for (let i = 0; i < 50 && status !== 200; i++) { try { status = (await fetch(`http://127.0.0.1:${port}/categories?select=id&limit=1`)).status; } catch {} if (status !== 200) await new Promise(r => setTimeout(r, 200)); }
+  process.kill(-p.pid, 'SIGTERM');
+  assert.equal(status, 200, 'PostgREST answered from the verified disposable database');
 });

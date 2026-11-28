@@ -4,7 +4,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 
-import { sqlSync, guard } from '../lib/db.mjs';
+import { sqlSync, guard, GUARD } from '../lib/db.mjs';
 // The browser tests use the same guarded disposable test database as every other test (tests/lib/db-guard.sh).
 export const PG = { host: process.env.PGHOST, port: process.env.PGPORT, get db() { return guard('name'); } };
 const JWT_SECRET = 'test-secret-test-secret-test-secret-123456';
@@ -104,14 +104,16 @@ const listen = s => new Promise(r => s.listen(0, '127.0.0.1', () => r(s.address(
 export async function startStack({ appCfg = {} } = {}) {
   const pgrstPort = 3010 + Math.floor(Math.random() * 500);
   sql(`do $$ begin if not exists (select 1 from pg_roles where rolname='authenticator') then create role authenticator noinherit login; end if; end $$; grant anon, authenticated, service_role to authenticator;`);
-  guard('verify');   // PostgREST (the server under test) may only connect to the verified disposable test database
-  const conf = `/tmp/pgrst-${pgrstPort}.conf`;
-  (await import('node:fs')).writeFileSync(conf, `db-uri = "postgres://authenticator@/${PG.db}?host=${PG.host}&port=${PG.port}"\ndb-schemas = "public"\ndb-anon-role = "anon"\njwt-secret = "${JWT_SECRET}"\nserver-port = ${pgrstPort}\nserver-host = "127.0.0.1"\nlog-level = "error"\n`);
-  const pgrst = spawn('runuser', ['-u', 'claude', '--', '/tmp/pgrst/postgrest', conf], { stdio: 'ignore' });
+  // PostgREST (the server under test) is started BY THE GUARD: it verifies the disposable database, writes the only
+  // allowed configuration (exact database URI) and starts PostgREST with a clean environment. The JWT test secret goes
+  // through stdin. Stopping kills the whole process group (guard + PostgREST); the guard then deletes its config.
+  const pgrst = spawn('bash', [GUARD, 'postgrest', 'main', String(pgrstPort)], { detached: true, stdio: ['pipe', 'ignore', 'inherit'],
+    env: { ...process.env, ALFRZO_PGRST_RUNAS: process.env.ALFRZO_PGRST_RUNAS || 'claude' } });
+  pgrst.stdin.end(JWT_SECRET + '\n');
   const shim = authShim(pgrstPort); const shimPort = await listen(shim);
   for (let i = 0; i < 50; i++) { try { if ((await fetch(`http://127.0.0.1:${pgrstPort}/categories?select=id&limit=1`, { headers: { Authorization: 'Bearer ' + ANON } })).ok) break; } catch {} await new Promise(r => setTimeout(r, 200)); }
   const { loadConfig } = await import('../../server/config.js'); const { createServer } = await import('../../server/server.js');
   const cfg = loadConfig({ SUPABASE_URL: `http://127.0.0.1:${shimPort}`, SUPABASE_ANON_KEY: ANON, CONTACT_EMAIL: 'help@example.org', ...appCfg });
   const app = createServer(cfg, { error() {}, warn() {}, log() {} }); const appPort = await listen(app);
-  return { url: `http://127.0.0.1:${appPort}`, async stop() { app.close(); app.closeAllConnections?.(); shim.close(); pgrst.kill(); } };
+  return { url: `http://127.0.0.1:${appPort}`, async stop() { app.close(); app.closeAllConnections?.(); shim.close(); try { process.kill(-pgrst.pid, 'SIGTERM'); } catch { /* already stopped */ } } };
 }
